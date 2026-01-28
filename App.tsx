@@ -59,7 +59,9 @@ import {
   Settings2,
   Volume2,
   VolumeX,
-  WrapText
+  WrapText,
+  Link,
+  Scissors
 } from 'lucide-react';
 
 export function App() {
@@ -71,6 +73,7 @@ export function App() {
   const [cues, setCues] = useState<Cue[]>([]);
   const [viewMode, setViewMode] = useState<'line' | 'word'>('line');
   const [metadata, setMetadata] = useState<Metadata>({ title: '', artist: '', album: '', by: '' });
+  const [selectedCueIds, setSelectedCueIds] = useState<Set<string>>(new Set());
   
   // History State for Undo/Redo
   const [history, setHistory] = useState<Cue[][]>([]);
@@ -87,6 +90,8 @@ export function App() {
   const [currentTime, setCurrentTime] = useState(0);
   const [duration, setDuration] = useState(0);
   const [isPlaying, setIsPlaying] = useState(false);
+  const [volume, setVolume] = useState(1);
+  const [isMuted, setIsMuted] = useState(false);
   const mediaRef = useRef<HTMLMediaElement>(null);
   const rafRef = useRef<number | null>(null);
 
@@ -117,12 +122,12 @@ export function App() {
   // Home Page AI States
   const [homeTab, setHomeTab] = useState<'upload' | 'generate' | 'transcribe'>('upload');
   const [genPrompt, setGenPrompt] = useState('');
-  const [genModel, setGenModel] = useState('gemini-3-flash-preview');
+  const [genModel, setGenModel] = useState('gemini-2.5-flash');
   const [isGenerating, setIsGenerating] = useState(false);
   
   // Transcription States
-  const [transcribeModel, setTranscribeModel] = useState('gemini-3-flash-preview');
-  const [sidebarTranscribeModel, setSidebarTranscribeModel] = useState('gemini-3-flash-preview'); // Separate state for sidebar
+  const [transcribeModel, setTranscribeModel] = useState('gemini-2.5-flash');
+  const [sidebarTranscribeModel, setSidebarTranscribeModel] = useState('gemini-2.5-flash'); // Separate state for sidebar
   const [transcribeMode, setTranscribeMode] = useState<'lines' | 'words'>('lines');
   const [isTranscribing, setIsTranscribing] = useState(false);
 
@@ -246,6 +251,27 @@ export function App() {
     }
   };
 
+  const toggleMute = () => {
+    if (mediaRef.current) {
+        const newMuteState = !isMuted;
+        setIsMuted(newMuteState);
+        mediaRef.current.muted = newMuteState;
+    }
+  };
+
+  const handleVolumeChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+      const newVolume = parseFloat(e.target.value);
+      setVolume(newVolume);
+      if (mediaRef.current) {
+          mediaRef.current.volume = newVolume;
+          // Unmute if volume is adjusted
+          if (newVolume > 0 && isMuted) {
+              setIsMuted(false);
+              mediaRef.current.muted = false;
+          }
+      }
+  };
+
   const handleMediaLoadedMetadata = () => {
       if (mediaRef.current) {
           setDuration(mediaRef.current.duration * 1000);
@@ -287,6 +313,21 @@ export function App() {
     }
   };
 
+  const handleToggleSelection = (id: string, shiftKey: boolean) => {
+      const newSelection = new Set(selectedCueIds);
+      
+      if (shiftKey && selectedCueIds.size > 0) {
+          // Find range if needed, for now simple toggle is fine or range logic here
+          // Implementing simple toggle for now as per request "select some rows"
+          if (newSelection.has(id)) newSelection.delete(id);
+          else newSelection.add(id);
+      } else {
+          if (newSelection.has(id)) newSelection.delete(id);
+          else newSelection.add(id);
+      }
+      setSelectedCueIds(newSelection);
+  };
+
   // File Handling Logic
   const processSubtitleFile = (file: File) => {
     const reader = new FileReader();
@@ -310,6 +351,7 @@ export function App() {
 
       setHistory([parsedCues]);
       setHistoryIndex(0);
+      setSelectedCueIds(new Set());
     };
     reader.readAsText(file);
   };
@@ -369,6 +411,17 @@ export function App() {
     setMetadata({ title: '', artist: '', album: '', by: '' });
     setHistory([[]]);
     setHistoryIndex(0);
+    setSelectedCueIds(new Set());
+  };
+
+  const confirmCreateNew = () => {
+    if (cues.length > 0) {
+        if (window.confirm("Create new blank file? Current progress will be lost if not exported.")) {
+            handleCreateBlank();
+        }
+    } else {
+        handleCreateBlank();
+    }
   };
 
   const handleHomeGenerate = async () => {
@@ -510,16 +563,23 @@ export function App() {
   };
 
   const shiftAllTimes = (ms: number) => {
-    const updated = cues.map(c => ({
-      ...c,
-      start: Math.max(0, c.start + ms),
-      end: Math.max(0, c.end + ms),
-      words: c.words?.map(w => ({
-        ...w,
-        start: w.start ? Math.max(0, w.start + ms) : undefined,
-        end: w.end ? Math.max(0, w.end + ms) : undefined
-      }))
-    }));
+    const hasSelection = selectedCueIds.size > 0;
+    
+    const updated = cues.map(c => {
+      if (hasSelection && !selectedCueIds.has(c.id)) {
+          return c; // Skip unselected if there is a selection
+      }
+      return {
+          ...c,
+          start: Math.max(0, c.start + ms),
+          end: Math.max(0, c.end + ms),
+          words: c.words?.map(w => ({
+            ...w,
+            start: w.start ? Math.max(0, w.start + ms) : undefined,
+            end: w.end ? Math.max(0, w.end + ms) : undefined
+          }))
+      };
+    });
     updateCues(updated);
   };
 
@@ -576,6 +636,56 @@ export function App() {
      setIsToolsMenuOpen(false);
   };
 
+  const removeEmptyWords = () => {
+    const updated = cues.map(cue => {
+        if (!cue.words || cue.words.length === 0) return cue;
+        
+        const newWords = cue.words.filter(w => w.text.trim() !== '');
+        
+        return { ...cue, words: newWords };
+    });
+    updateCues(updated);
+    setIsToolsMenuOpen(false);
+  };
+
+  const fillWordGaps = () => {
+      const updated = cues.map(cue => {
+          if (!cue.words || cue.words.length === 0) return cue;
+          
+          // Sort words by start time
+          const sortedWords = [...cue.words].sort((a, b) => (a.start || 0) - (b.start || 0));
+          
+          const newWords = sortedWords.map((w, i) => {
+              // Align start of first word to cue start if gap exists (optional, but good for karaoke)
+              let newStart = w.start || 0;
+              if (i === 0 && newStart > cue.start) {
+                  newStart = cue.start;
+              }
+
+              const nextWord = sortedWords[i + 1];
+              let newEnd = w.end || 0;
+
+              // Extend end to next word start, or cue end if it is the last word
+              if (nextWord) {
+                  newEnd = nextWord.start || newEnd;
+              } else {
+                  // For the last word, extend to the end of the line
+                  newEnd = Math.max(newEnd, cue.end);
+              }
+
+              return {
+                  ...w,
+                  start: newStart,
+                  end: newEnd
+              };
+          });
+          
+          return { ...cue, words: newWords };
+      });
+      updateCues(updated);
+      setIsToolsMenuOpen(false);
+  };
+
   const handleWordSave = (words: Word[] | undefined) => {
     if (editingWordIndex !== null) {
       const updatedCues = [...cues];
@@ -584,7 +694,11 @@ export function App() {
           delete newCue.words;
           updatedCues[editingWordIndex] = newCue;
       } else {
-          updatedCues[editingWordIndex].words = words;
+          // Clone the cue object before modifying 'words' to prevent history mutation
+          updatedCues[editingWordIndex] = {
+              ...updatedCues[editingWordIndex],
+              words: words
+          };
       }
       updateCues(updatedCues);
       setEditingWordIndex(null);
@@ -637,7 +751,7 @@ export function App() {
            <button onClick={toggleFullscreen} className="p-3 rounded-full bg-neutral-100 dark:bg-neutral-800 text-neutral-600 dark:text-neutral-300 hover:bg-neutral-200 dark:hover:bg-neutral-700 transition">
              {isFullscreen ? <Minimize size={20} /> : <Maximize size={20} />}
            </button>
-           <button onClick={() => setDarkMode(!darkMode)} className="p-3 rounded-full bg-neutral-100 dark:bg-neutral-800 text-neutral-600 dark:text-neutral-300 hover:bg-neutral-200 dark:hover:bg-neutral-700 transition">
+           <button onClick={() => setDarkMode(!darkMode)} className="p-3 rounded-full bg-neutral-100 dark:bg-neutral-800 text-neutral-600 dark:text-neutral-400 transition">
              {darkMode ? <Sun size={20} /> : <Moon size={20} />}
            </button>
         </div>
@@ -829,36 +943,27 @@ export function App() {
   return (
     <div className="min-h-screen bg-white dark:bg-neutral-950 text-neutral-900 dark:text-neutral-100 transition-colors flex flex-col h-screen overflow-hidden">
       {/* Top Header */}
-      <header className="flex-none h-16 border-b border-neutral-200 dark:border-neutral-800 flex items-center justify-between px-4 bg-white/80 dark:bg-neutral-950/80 backdrop-blur-md z-40">
-        <div className="flex items-center gap-3">
+      <header className="flex-none h-16 border-b border-neutral-200 dark:border-neutral-800 flex items-center justify-between px-3 md:px-4 bg-white/80 dark:bg-neutral-950/80 backdrop-blur-md z-40">
+        <div className="flex items-center gap-3 min-w-0 flex-1 mr-2">
            <button 
              onClick={() => setFileData(null)} 
-             className="p-2 hover:bg-neutral-100 dark:hover:bg-neutral-800 rounded-lg text-neutral-500 transition"
+             className="p-2 hover:bg-neutral-100 dark:hover:bg-neutral-800 rounded-lg text-neutral-500 transition shrink-0"
              title="Back to Home"
            >
              <ChevronLeft size={20} />
            </button>
-           <div className="flex flex-col">
+           <div className="flex flex-col min-w-0 flex-1 max-w-[140px] sm:max-w-none">
               <input 
                  type="text" 
                  value={fileData.name} 
                  onChange={(e) => setFileData({...fileData, name: e.target.value})}
-                 className="font-semibold text-sm leading-tight max-w-[200px] md:max-w-[300px] truncate bg-transparent outline-none border-b border-transparent focus:border-primary-500 transition p-0"
+                 className="font-semibold text-sm leading-tight w-full bg-transparent outline-none border-b border-transparent focus:border-primary-500 transition p-0 truncate"
               />
-              <span className="text-[10px] text-neutral-400 uppercase tracking-wider font-bold">{getFormatDisplayName(fileData.format)}</span>
+              <span className="text-[10px] text-neutral-400 uppercase tracking-wider font-bold truncate">{getFormatDisplayName(fileData.format)}</span>
            </div>
         </div>
 
-        <div className="flex items-center gap-2">
-           {/* Quick Access Timing */}
-           <div className="hidden lg:flex items-center gap-1 bg-neutral-100 dark:bg-neutral-800 rounded-lg p-1 mr-2">
-              <button onClick={() => shiftAllTimes(-500)} className="px-2 py-1 text-xs font-mono text-neutral-600 dark:text-neutral-400 hover:bg-white dark:hover:bg-neutral-700 rounded transition" title="-500ms">{'<<'}</button>
-              <button onClick={() => shiftAllTimes(-100)} className="px-2 py-1 text-xs font-mono text-neutral-600 dark:text-neutral-400 hover:bg-white dark:hover:bg-neutral-700 rounded transition" title="-100ms">{'<'}</button>
-              <div className="w-px h-4 bg-neutral-300 dark:bg-neutral-700 mx-1"></div>
-              <button onClick={() => shiftAllTimes(100)} className="px-2 py-1 text-xs font-mono text-neutral-600 dark:text-neutral-400 hover:bg-white dark:hover:bg-neutral-700 rounded transition" title="+100ms">{'>'}</button>
-              <button onClick={() => shiftAllTimes(500)} className="px-2 py-1 text-xs font-mono text-neutral-600 dark:text-neutral-400 hover:bg-white dark:hover:bg-neutral-700 rounded transition" title="+500ms">{'>>'}</button>
-           </div>
-
+        <div className="flex items-center gap-1 md:gap-2 shrink-0">
            <button 
              onClick={toggleFullscreen}
              className="p-2.5 rounded-xl hover:bg-neutral-100 dark:hover:bg-neutral-800 text-neutral-600 dark:text-neutral-400 transition"
@@ -869,7 +974,7 @@ export function App() {
              onClick={() => setDarkMode(!darkMode)}
              className="p-2.5 rounded-xl hover:bg-neutral-100 dark:hover:bg-neutral-800 text-neutral-600 dark:text-neutral-400 transition"
            >
-             {darkMode ? <Sun size={18} /> : <Moon size={18} />}
+             {darkMode ? <Sun size={18} /> : <Moon size={20} />}
            </button>
 
            {/* Tools Menu */}
@@ -883,13 +988,19 @@ export function App() {
               </button>
               
               {isToolsMenuOpen && (
-                 <div className="absolute top-full right-0 mt-2 w-56 bg-white dark:bg-neutral-900 rounded-xl shadow-xl border border-neutral-200 dark:border-neutral-800 overflow-hidden z-50 animate-in fade-in zoom-in-95 duration-100">
+                 <div className="absolute top-full right-0 mt-2 w-64 bg-white dark:bg-neutral-900 rounded-xl shadow-xl border border-neutral-200 dark:border-neutral-800 overflow-hidden z-50 animate-in fade-in zoom-in-95 duration-100">
                     <div className="p-1">
                        <button onClick={compactWhitespace} className="w-full text-left px-3 py-2 rounded-lg hover:bg-neutral-100 dark:hover:bg-neutral-800 text-sm transition flex items-center gap-2">
                           <WrapText size={14} className="text-indigo-500" /> Compact Whitespace
                        </button>
                        <button onClick={autoGenerateKaraoke} className="w-full text-left px-3 py-2 rounded-lg hover:bg-neutral-100 dark:hover:bg-neutral-800 text-sm transition flex items-center gap-2">
                           <Wand2 size={14} className="text-purple-500" /> Auto-Word Timing
+                       </button>
+                       <button onClick={fillWordGaps} className="w-full text-left px-3 py-2 rounded-lg hover:bg-neutral-100 dark:hover:bg-neutral-800 text-sm transition flex items-center gap-2">
+                          <Link size={14} className="text-orange-500" /> Fill Word Gaps
+                       </button>
+                       <button onClick={removeEmptyWords} className="w-full text-left px-3 py-2 rounded-lg hover:bg-neutral-100 dark:hover:bg-neutral-800 text-sm transition flex items-center gap-2">
+                          <Scissors size={14} className="text-pink-500" /> Remove Empty Words
                        </button>
                        <button onClick={clearKaraokeData} className="w-full text-left px-3 py-2 rounded-lg hover:bg-neutral-100 dark:hover:bg-neutral-800 text-sm transition flex items-center gap-2">
                           <Eraser size={14} className="text-red-500" /> Clear Word Data
@@ -905,7 +1016,7 @@ export function App() {
            <div className="relative" ref={exportMenuRef}>
               <button 
                 onClick={() => setIsExportMenuOpen(!isExportMenuOpen)}
-                className="flex items-center gap-2 px-4 py-2 bg-neutral-900 dark:bg-white text-white dark:text-neutral-900 rounded-xl font-medium text-sm hover:opacity-90 transition shadow-lg shadow-neutral-500/10"
+                className="flex items-center gap-2 px-3 md:px-4 py-2 bg-neutral-900 dark:bg-white text-white dark:text-neutral-900 rounded-xl font-medium text-sm hover:opacity-90 transition shadow-lg shadow-neutral-500/10 shrink-0"
               >
                 <Download size={16} /> <span className="hidden sm:inline">Export</span> <ChevronDown size={14} />
               </button>
@@ -968,7 +1079,7 @@ export function App() {
          {/* Sidebar (Left Slider) */}
          <div className={`
              transition-all duration-300 ease-in-out bg-neutral-50 dark:bg-neutral-900 border-r border-neutral-200 dark:border-neutral-800 flex flex-col z-50
-             ${isVideoVisible ? 'fixed inset-0 w-full md:relative md:w-[400px] lg:w-[450px] md:inset-auto' : 'w-0 border-none overflow-hidden'}
+             ${isVideoVisible ? 'fixed inset-x-0 bottom-0 top-16 md:relative md:top-auto md:w-[400px] lg:w-[450px] md:inset-auto' : 'w-0 border-none overflow-hidden'}
          `}>
              {/* Sidebar Tabs */}
              <div className="flex border-b border-neutral-200 dark:border-neutral-800 bg-white dark:bg-neutral-900 relative">
@@ -1147,75 +1258,103 @@ export function App() {
          </div>
 
          <div className="flex-1 flex flex-col h-full overflow-hidden bg-white dark:bg-neutral-950 relative">
-             <div className="flex-none h-14 border-b border-neutral-100 dark:border-neutral-900 flex items-center justify-between px-4 bg-white dark:bg-neutral-950 z-30 gap-4">
-                 <div className="flex items-center gap-1 shrink-0">
-                     <button onClick={() => setIsVideoVisible(!isVideoVisible)} className={`p-2 rounded-lg transition ${isVideoVisible ? 'text-primary-600 bg-primary-50 dark:bg-primary-900/20' : 'text-neutral-400 hover:bg-neutral-100 dark:hover:bg-neutral-800'}`} title="Toggle Sidebar">
-                        <LayoutGrid size={18} />
-                     </button>
-                     <div className="h-4 w-px bg-neutral-200 dark:bg-neutral-800 mx-1"></div>
+             <div className="flex-none bg-white dark:bg-neutral-950 border-b border-neutral-200 dark:border-neutral-800 z-30 p-2 md:px-4">
+                 <div className="flex flex-wrap items-center gap-2">
                      
-                     {/* Load Media Button */}
-                     <label className="p-2 text-neutral-500 hover:text-neutral-900 dark:hover:text-neutral-100 cursor-pointer transition flex items-center gap-2 group rounded-lg hover:bg-neutral-100 dark:hover:bg-neutral-800" title="Attach Audio/Video">
-                        <FileVideo size={18} className="group-hover:text-primary-500 transition-colors" />
-                        <span className="text-xs font-medium hidden lg:inline">Load Media</span>
-                        <input 
-                            type="file" 
-                            className="hidden" 
-                            accept="audio/*,video/*,.mp3,.wav,.ogg,.m4a,.mp4,.webm,.ogv,.mov,.mkv"
-                            onChange={(e) => e.target.files?.[0] && processMediaFile(e.target.files[0])} 
-                        />
-                     </label>
+                     {/* 1. Left Controls */}
+                     <div className="flex items-center gap-1 overflow-x-auto w-full md:w-auto scrollbar-hide pb-2 md:pb-0 mask-gradient pr-2 order-1">
+                        <button onClick={() => setIsVideoVisible(!isVideoVisible)} className={`p-2 rounded-lg transition shrink-0 ${isVideoVisible ? 'text-primary-600 bg-primary-50 dark:bg-primary-900/20' : 'text-neutral-400 hover:bg-neutral-100 dark:hover:bg-neutral-800'}`} title="Toggle Sidebar">
+                           <LayoutGrid size={18} />
+                        </button>
+                        <div className="h-4 w-px bg-neutral-200 dark:bg-neutral-800 mx-1 shrink-0"></div>
+                        
+                        <button onClick={confirmCreateNew} className="p-2 text-neutral-500 hover:text-neutral-900 dark:hover:text-neutral-100 transition shrink-0 hover:bg-neutral-100 dark:hover:bg-neutral-800 rounded-lg" title="New Blank File">
+                           <FilePlus size={18} />
+                        </button>
 
-                     {/* Open Lyric File Button */}
-                     <label className="p-2 text-neutral-500 hover:text-neutral-900 dark:hover:text-neutral-100 cursor-pointer transition flex items-center gap-2 group rounded-lg hover:bg-neutral-100 dark:hover:bg-neutral-800" title="Open Lyric File">
-                        <FolderOpen size={18} className="group-hover:text-primary-500 transition-colors" />
-                        <span className="text-xs font-medium hidden lg:inline">Open File</span>
-                        <input 
-                            type="file" 
-                            className="hidden" 
-                            accept=".lrc,.srt,.vtt,.xml,.ttml,.txt,.json"
-                            onChange={(e) => e.target.files?.[0] && processSubtitleFile(e.target.files[0])} 
-                        />
-                     </label>
+                        {/* Load Media Button */}
+                        <label className="p-2 text-neutral-500 hover:text-neutral-900 dark:hover:text-neutral-100 cursor-pointer transition flex items-center gap-2 group rounded-lg hover:bg-neutral-100 dark:hover:bg-neutral-800 shrink-0" title="Attach Audio/Video">
+                           <FileVideo size={18} className="group-hover:text-primary-500 transition-colors" />
+                           <span className="text-xs font-medium hidden lg:inline">Load</span>
+                           <input 
+                               type="file" 
+                               className="hidden" 
+                               accept="audio/*,video/*,.mp3,.wav,.ogg,.m4a,.mp4,.webm,.ogv,.mov,.mkv"
+                               onChange={(e) => e.target.files?.[0] && processMediaFile(e.target.files[0])} 
+                           />
+                        </label>
 
-                     <div className="h-4 w-px bg-neutral-200 dark:bg-neutral-800 mx-1"></div>
-                     
-                     <button onClick={undo} disabled={historyIndex <= 0} className="p-2 text-neutral-500 hover:text-neutral-900 dark:hover:text-neutral-100 disabled:opacity-30 transition">
-                        <Undo2 size={18} />
-                     </button>
-                     <button onClick={redo} disabled={historyIndex >= history.length - 1} className="p-2 text-neutral-500 hover:text-neutral-900 dark:hover:text-neutral-100 disabled:opacity-30 transition">
-                        <Redo2 size={18} />
-                     </button>
-                     <div className="h-4 w-px bg-neutral-200 dark:bg-neutral-800 mx-1"></div>
-                     
-                     <button onClick={() => setIsFindReplaceOpen(!isFindReplaceOpen)} className={`p-2 rounded-lg transition ${isFindReplaceOpen ? 'bg-neutral-100 dark:bg-neutral-800 text-neutral-900 dark:text-white' : 'text-neutral-500 hover:text-neutral-900 dark:hover:text-neutral-100'}`} title="Find & Replace">
-                        <Replace size={18} />
-                     </button>
-                     <button onClick={() => setIsShiftModalOpen(true)} className="p-2 text-neutral-500 hover:text-neutral-900 dark:hover:text-neutral-100 transition" title="Shift Times">
-                        <Clock size={18} />
-                     </button>
-                 </div>
+                        {/* Open Lyric File Button */}
+                        <label className="p-2 text-neutral-500 hover:text-neutral-900 dark:hover:text-neutral-100 cursor-pointer transition flex items-center gap-2 group rounded-lg hover:bg-neutral-100 dark:hover:bg-neutral-800 shrink-0" title="Open Lyric File">
+                           <FolderOpen size={18} className="group-hover:text-primary-500 transition-colors" />
+                           <span className="text-xs font-medium hidden lg:inline">Open</span>
+                           <input 
+                               type="file" 
+                               className="hidden" 
+                               accept=".lrc,.srt,.vtt,.xml,.ttml,.txt,.json"
+                               onChange={(e) => e.target.files?.[0] && processSubtitleFile(e.target.files[0])} 
+                           />
+                        </label>
 
-                 {/* Search Bar */}
-                 <div className="flex-1 max-w-sm relative hidden md:block">
-                     <Search size={16} className="absolute left-3 top-1/2 -translate-y-1/2 text-neutral-400" />
-                     <input 
-                        type="text" 
-                        value={searchQuery}
-                        onChange={(e) => setSearchQuery(e.target.value)}
-                        placeholder="Search lines..." 
-                        className="w-full pl-9 pr-3 py-1.5 bg-neutral-100 dark:bg-neutral-800 border-none rounded-lg text-sm outline-none focus:ring-2 focus:ring-primary-500/50 transition"
-                     />
-                 </div>
-
-                 <div className="flex items-center gap-2 shrink-0">
-                     <div className="flex items-center bg-neutral-100 dark:bg-neutral-900 p-1 rounded-lg">
-                        <button onClick={() => setViewMode('line')} className={`px-3 py-1.5 rounded-md text-xs font-medium transition ${viewMode === 'line' ? 'bg-white dark:bg-neutral-800 shadow-sm text-neutral-900 dark:text-white' : 'text-neutral-500'}`}>Lines</button>
-                        <button onClick={() => setViewMode('word')} className={`px-3 py-1.5 rounded-md text-xs font-medium transition ${viewMode === 'word' ? 'bg-white dark:bg-neutral-800 shadow-sm text-neutral-900 dark:text-white' : 'text-neutral-500'}`}>Words</button>
+                        <div className="h-4 w-px bg-neutral-200 dark:bg-neutral-800 mx-1 shrink-0"></div>
+                        
+                        <button onClick={undo} disabled={historyIndex <= 0} className="p-2 text-neutral-500 hover:text-neutral-900 dark:hover:text-neutral-100 disabled:opacity-30 transition shrink-0 hover:bg-neutral-100 dark:hover:bg-neutral-800 rounded-lg">
+                           <Undo2 size={18} />
+                        </button>
+                        <button onClick={redo} disabled={historyIndex >= history.length - 1} className="p-2 text-neutral-500 hover:text-neutral-900 dark:hover:text-neutral-100 disabled:opacity-30 transition shrink-0 hover:bg-neutral-100 dark:hover:bg-neutral-800 rounded-lg">
+                           <Redo2 size={18} />
+                        </button>
+                        <div className="h-4 w-px bg-neutral-200 dark:bg-neutral-800 mx-1 shrink-0"></div>
+                        
+                        <button onClick={() => setIsFindReplaceOpen(!isFindReplaceOpen)} className={`p-2 rounded-lg transition shrink-0 ${isFindReplaceOpen ? 'bg-neutral-100 dark:bg-neutral-800 text-neutral-900 dark:text-white' : 'text-neutral-500 hover:text-neutral-900 dark:hover:text-neutral-100'}`} title="Find & Replace">
+                           <Replace size={18} />
+                        </button>
+                        <button onClick={() => setIsShiftModalOpen(true)} className="p-2 text-neutral-500 hover:text-neutral-900 dark:hover:text-neutral-100 transition shrink-0 hover:bg-neutral-100 dark:hover:bg-neutral-800 rounded-lg" title="Shift Times">
+                           <Clock size={18} />
+                        </button>
                      </div>
-                     <button onClick={() => setIsAIAssistantOpen(true)} className="flex items-center gap-2 px-3 py-1.5 bg-gradient-to-r from-indigo-500 to-purple-600 text-white rounded-lg text-xs font-bold shadow-lg shadow-indigo-500/20 hover:shadow-indigo-500/40 transition active:scale-95">
-                        <Sparkles size={14} /> AI Tools
-                     </button>
+
+                      {/* 2. View/AI Controls */}
+                      <div className="flex items-center gap-2 shrink-0 order-2">
+                          <div className="flex items-center bg-neutral-100 dark:bg-neutral-900 p-1 rounded-lg">
+                              <button onClick={() => setViewMode('line')} className={`px-2 py-1.5 rounded-md text-[10px] uppercase font-bold transition ${viewMode === 'line' ? 'bg-white dark:bg-neutral-800 shadow-sm text-neutral-900 dark:text-white' : 'text-neutral-500'}`}>Lines</button>
+                              <button onClick={() => setViewMode('word')} className={`px-2 py-1.5 rounded-md text-[10px] uppercase font-bold transition ${viewMode === 'word' ? 'bg-white dark:bg-neutral-800 shadow-sm text-neutral-900 dark:text-white' : 'text-neutral-500'}`}>Words</button>
+                          </div>
+                          <button onClick={() => setIsAIAssistantOpen(true)} className="flex items-center gap-2 px-3 py-1.5 bg-gradient-to-r from-orange-500 to-red-600 text-white rounded-lg text-xs font-bold shadow-lg shadow-orange-500/20 hover:shadow-orange-500/40 transition active:scale-95">
+                              <Sparkles size={14} /> AI
+                          </button>
+                      </div>
+
+                      {/* 3. Quick Access (Moved) */}
+                      <div className="flex-none order-3 mt-2 md:mt-0">
+                           <div className="flex items-center gap-1 bg-neutral-100 dark:bg-neutral-900 p-1 rounded-lg">
+                              <button onClick={() => shiftAllTimes(-500)} className="px-3 py-1.5 text-xs font-mono text-neutral-600 dark:text-neutral-400 hover:bg-white dark:hover:bg-neutral-700 rounded transition" title="-500ms">{'<<'}</button>
+                              <button onClick={() => shiftAllTimes(-100)} className="px-3 py-1.5 text-xs font-mono text-neutral-600 dark:text-neutral-400 hover:bg-white dark:hover:bg-neutral-700 rounded transition" title="-100ms">{'<'}</button>
+                              <div className="w-px h-4 bg-neutral-300 dark:bg-neutral-700 mx-1"></div>
+                              <button onClick={() => shiftAllTimes(100)} className="px-3 py-1.5 text-xs font-mono text-neutral-600 dark:text-neutral-400 hover:bg-white dark:hover:bg-neutral-700 rounded transition" title="+100ms">{'>'}</button>
+                              <button onClick={() => shiftAllTimes(500)} className="px-3 py-1.5 text-xs font-mono text-neutral-600 dark:text-neutral-400 hover:bg-white dark:hover:bg-neutral-700 rounded transition" title="+500ms">{'>>'}</button>
+                           </div>
+                      </div>
+
+                      {/* 4. Search Bar (Moved & Flexible) */}
+                      <div className="flex-1 min-w-[200px] relative order-4 mt-2 md:mt-0">
+                          <Search size={16} className="absolute left-3 top-1/2 -translate-y-1/2 text-neutral-400 pointer-events-none" />
+                          <input 
+                              type="text" 
+                              value={searchQuery}
+                              onChange={(e) => setSearchQuery(e.target.value)}
+                              placeholder="Search..." 
+                              className="w-full pl-9 pr-8 py-2 bg-neutral-100 dark:bg-neutral-800 border-none rounded-lg text-sm outline-none focus:ring-2 focus:ring-primary-500/50 transition"
+                          />
+                          {searchQuery && (
+                              <button 
+                                  onClick={() => setSearchQuery('')}
+                                  className="absolute right-2 top-1/2 -translate-y-1/2 p-0.5 rounded-full text-neutral-400 hover:text-neutral-600 dark:hover:text-neutral-300 hover:bg-neutral-200 dark:hover:bg-neutral-700 transition"
+                              >
+                                  <X size={14} />
+                              </button>
+                          )}
+                      </div>
                  </div>
              </div>
              
@@ -1231,7 +1370,16 @@ export function App() {
 
              <div className="flex-1 overflow-y-auto p-4 md:p-6 scroll-smooth pb-32" id="cue-container">
                 <div className="max-w-6xl mx-auto">
-                   <CueList cues={filteredCues} onChange={handleCueChange} onEditWords={setEditingWordIndex} currentMillis={currentTime} onSeek={handleSeek} viewMode={viewMode} />
+                   <CueList 
+                        cues={filteredCues} 
+                        onChange={handleCueChange} 
+                        onEditWords={setEditingWordIndex} 
+                        currentMillis={currentTime} 
+                        onSeek={handleSeek} 
+                        viewMode={viewMode}
+                        selectedCueIds={selectedCueIds}
+                        onToggleSelection={handleToggleSelection}
+                   />
                    <button onClick={addNewCue} className="w-full py-4 mt-6 border-2 border-dashed border-neutral-300 dark:border-neutral-800 rounded-2xl text-neutral-400 hover:text-primary-500 hover:border-primary-400 hover:bg-primary-50 dark:hover:bg-primary-900/10 transition flex items-center justify-center gap-2 font-medium">
                       <Plus size={20} /> Add New Line
                    </button>
@@ -1263,6 +1411,25 @@ export function App() {
                                 <span>{msToLrc(duration)}</span>
                             </div>
                         </div>
+
+                        {/* Volume Control */}
+                        <div className="flex items-center gap-2 w-24 sm:w-32 group">
+                            <button 
+                                onClick={toggleMute}
+                                className="text-neutral-500 hover:text-neutral-900 dark:hover:text-neutral-100 transition"
+                            >
+                                {isMuted || volume === 0 ? <VolumeX size={18} /> : <Volume2 size={18} />}
+                            </button>
+                            <input 
+                                type="range" 
+                                min="0" 
+                                max="1" 
+                                step="0.05"
+                                value={isMuted ? 0 : volume}
+                                onChange={handleVolumeChange}
+                                className="w-full h-1 bg-neutral-200 dark:bg-neutral-700 rounded-full appearance-none cursor-pointer accent-neutral-500 hover:accent-neutral-700 dark:hover:accent-neutral-300"
+                            />
+                        </div>
                     </div>
                  </div>
              )}
@@ -1288,6 +1455,9 @@ export function App() {
           <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm px-4">
               <div className="bg-white dark:bg-neutral-900 p-6 rounded-2xl shadow-xl w-full max-w-sm border border-neutral-200 dark:border-neutral-800">
                   <h3 className="font-bold text-lg mb-4">Shift Time</h3>
+                  <div className="mb-4 text-xs text-neutral-500">
+                      {selectedCueIds.size > 0 ? `Applying to ${selectedCueIds.size} selected row(s)` : 'Applying to all rows'}
+                  </div>
                   <div className="space-y-3">
                       <button onClick={() => { shiftAllTimes(100); setIsShiftModalOpen(false); }} className="w-full py-2 bg-neutral-100 dark:bg-neutral-800 rounded-lg text-sm hover:bg-neutral-200 dark:hover:bg-neutral-700 transition">+100ms</button>
                       <button onClick={() => { shiftAllTimes(-100); setIsShiftModalOpen(false); }} className="w-full py-2 bg-neutral-100 dark:bg-neutral-800 rounded-lg text-sm hover:bg-neutral-200 dark:hover:bg-neutral-700 transition">-100ms</button>

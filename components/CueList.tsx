@@ -1,7 +1,7 @@
 import React, { useRef, useEffect, useState } from 'react';
 import { Cue, Word } from '../types';
-import { msToSrt, msToLrc, msToVtt, timeToMs } from '../utils/timeUtils';
-import { AlignLeft, GripVertical, Mic, PlayCircle, Plus, Minus, Trash2, Bold, Italic } from 'lucide-react';
+import { msToSrt, msToLrc, msToVtt, msToMmSsMmm, timeToMs } from '../utils/timeUtils';
+import { AlignLeft, GripVertical, Mic, PlayCircle, Plus, Minus, Trash2, Bold, Italic, AlertCircle, CheckSquare, Square } from 'lucide-react';
 
 interface CueListProps {
   cues: Cue[];
@@ -10,6 +10,8 @@ interface CueListProps {
   currentMillis: number;
   onSeek?: (ms: number, shouldPlay?: boolean) => void;
   viewMode: 'line' | 'word';
+  selectedCueIds: Set<string>;
+  onToggleSelection: (id: string, shiftKey: boolean) => void;
 }
 
 // Helper for UI input to handle local state and prevent cursor jumping
@@ -107,12 +109,13 @@ const TimeInput = ({ ms, onChange, label, className = '' }: { ms: number, onChan
 
 // Specialized input for Word timestamps
 const WordTimeInput = ({ ms, onChange }: { ms: number, onChange: (val: number) => void }) => {
-    const [localText, setLocalText] = useState(msToLrc(ms));
+    // Use msToMmSsMmm for 3 digit precision (00:00.000)
+    const [localText, setLocalText] = useState(msToMmSsMmm(ms));
     const [isFocused, setIsFocused] = useState(false);
   
     useEffect(() => {
       if (!isFocused) {
-        setLocalText(msToLrc(ms));
+        setLocalText(msToMmSsMmm(ms));
       }
     }, [ms, isFocused]);
   
@@ -131,13 +134,13 @@ const WordTimeInput = ({ ms, onChange }: { ms: number, onChange: (val: number) =
             e.preventDefault();
             const newVal = Math.max(0, ms - 100);
             onChange(newVal);
-            setLocalText(msToLrc(newVal));
+            setLocalText(msToMmSsMmm(newVal));
         }
         if (e.key === '+' || e.key === '=') {
             e.preventDefault();
             const newVal = ms + 100;
             onChange(newVal);
-            setLocalText(msToLrc(newVal));
+            setLocalText(msToMmSsMmm(newVal));
         }
     };
   
@@ -149,13 +152,14 @@ const WordTimeInput = ({ ms, onChange }: { ms: number, onChange: (val: number) =
             onFocus={() => setIsFocused(true)}
             onBlur={() => { setIsFocused(false); commitChange(); }}
             onKeyDown={handleKeyDown}
-            className="w-16 text-xs font-mono text-center bg-transparent text-neutral-500 focus:text-primary-600 outline-none"
-            placeholder="00:00.00"
+            className="w-20 text-xs font-mono text-center bg-transparent text-neutral-500 focus:text-primary-600 outline-none"
+            placeholder="00:00.000"
+            onClick={(e) => e.stopPropagation()} 
         />
     );
 };
 
-// Component for Line Text (Textarea) to update only on Blur (for Undo/Redo history hygiene)
+// Component for Line Text (Textarea)
 const LocalTextarea = ({ value, onChange, className, placeholder, rows, onInsert }: { value: string, onChange: (val: string) => void, className?: string, placeholder?: string, rows?: number, onInsert?: (tag: string) => void }) => {
     const [localText, setLocalText] = useState(value);
     const [isFocused, setIsFocused] = useState(false);
@@ -198,7 +202,6 @@ const LocalTextarea = ({ value, onChange, className, placeholder, rows, onInsert
                 placeholder={placeholder}
                 rows={rows}
             />
-            {/* Floating Style Controls on Focus/Hover */}
             <div className="absolute right-2 bottom-2 flex gap-1 opacity-0 group-hover/textarea:opacity-100 group-focus-within/textarea:opacity-100 transition-opacity">
                 <button 
                   onMouseDown={(e) => { e.preventDefault(); handleInsert('b'); }}
@@ -219,7 +222,7 @@ const LocalTextarea = ({ value, onChange, className, placeholder, rows, onInsert
     );
 };
 
-// Component for Word Text (Input) to update only on Blur
+// Component for Word Text (Input)
 const LocalInput = ({ value, onChange, className, placeholder }: { value: string, onChange: (val: string) => void, className?: string, placeholder?: string }) => {
     const [localText, setLocalText] = useState(value);
     const [isFocused, setIsFocused] = useState(false);
@@ -239,11 +242,12 @@ const LocalInput = ({ value, onChange, className, placeholder }: { value: string
             onBlur={() => { setIsFocused(false); if (localText !== value) onChange(localText); }}
             className={className}
             placeholder={placeholder}
+            onClick={(e) => e.stopPropagation()} 
         />
     );
 };
 
-const CueList: React.FC<CueListProps> = ({ cues, onChange, onEditWords, currentMillis, onSeek, viewMode }) => {
+const CueList: React.FC<CueListProps> = ({ cues, onChange, onEditWords, currentMillis, onSeek, viewMode, selectedCueIds, onToggleSelection }) => {
   const itemRefs = useRef<(HTMLDivElement | null)[]>([]);
   const [draggedIndex, setDraggedIndex] = useState<number | null>(null);
   const [overIndex, setOverIndex] = useState<number | null>(null);
@@ -254,7 +258,6 @@ const CueList: React.FC<CueListProps> = ({ cues, onChange, onEditWords, currentM
   // Auto-scroll to active cue
   useEffect(() => {
     if (activeIndex !== -1 && itemRefs.current[activeIndex]) {
-      // Only scroll if not currently dragging/interacting to avoid jumping
       if (draggedIndex === null) {
           itemRefs.current[activeIndex]?.scrollIntoView({
             behavior: 'smooth',
@@ -269,6 +272,18 @@ const CueList: React.FC<CueListProps> = ({ cues, onChange, onEditWords, currentM
     if (field === 'start' || field === 'end') {
       const msValue = typeof value === 'string' ? timeToMs(value) : value;
       newCues[index] = { ...newCues[index], [field]: msValue };
+
+      // SYNC: If Start time changed, sync First Word Start if it exists
+      if (field === 'start') {
+          const cue = newCues[index];
+          if (cue.words && cue.words.length > 0) {
+              const updatedWords = [...cue.words];
+              // Update first word start to match line start
+              updatedWords[0] = { ...updatedWords[0], start: msValue };
+              newCues[index].words = updatedWords;
+          }
+      }
+
     } else {
       newCues[index] = { ...newCues[index], [field]: value };
     }
@@ -285,17 +300,13 @@ const CueList: React.FC<CueListProps> = ({ cues, onChange, onEditWords, currentM
     setDraggedIndex(index);
     setOverIndex(null);
     e.dataTransfer.effectAllowed = 'move';
-    
-    // Set the whole row as the drag image, not just the handle
     if (itemRefs.current[index]) {
-       // We set the drag image to the itemRef (the main container)
-       // This ensures the visual feedback is the whole row moving
        e.dataTransfer.setDragImage(itemRefs.current[index]!, 20, 20);
     }
   };
 
   const handleDragOver = (e: React.DragEvent<HTMLDivElement>, index: number) => {
-    e.preventDefault(); // Necessary to allow dropping
+    e.preventDefault(); 
     if (draggedIndex === index) return;
     e.dataTransfer.dropEffect = 'move';
     if (overIndex !== index) {
@@ -335,15 +346,23 @@ const CueList: React.FC<CueListProps> = ({ cues, onChange, onEditWords, currentM
     const cue = cues[cueIndex];
     let words = getDisplayWords(cue, cueIndex);
     const updatedWords = [...words];
+    
+    let msVal = value;
     if (field === 'start' || field === 'end') {
-       const msVal = typeof value === 'string' ? timeToMs(value) : value;
-       updatedWords[wordIndex] = { ...updatedWords[wordIndex], [field]: msVal };
-    } else {
-       updatedWords[wordIndex] = { ...updatedWords[wordIndex], [field]: value };
+       msVal = typeof value === 'string' ? timeToMs(value) : value;
     }
+    
+    updatedWords[wordIndex] = { ...updatedWords[wordIndex], [field]: msVal };
+    
     const newText = updatedWords.map(w => w.text).join(' ');
     const newCues = [...cues];
     newCues[cueIndex] = { ...cue, words: updatedWords, text: newText };
+
+    // SYNC: If First Word Start changed, sync Line Start
+    if (wordIndex === 0 && field === 'start') {
+        newCues[cueIndex].start = msVal as number;
+    }
+
     onChange(newCues);
   };
 
@@ -352,7 +371,13 @@ const CueList: React.FC<CueListProps> = ({ cues, onChange, onEditWords, currentM
       {cues.map((cue, index) => {
         const isActive = activeIndex === index;
         const isDragging = draggedIndex === index;
-
+        const isSelected = selectedCueIds.has(cue.id);
+        
+        // --- Overlap Detection (Lines) ---
+        // Check if current start is less than previous end
+        const prevCue = index > 0 ? cues[index - 1] : null;
+        const isLineOverlap = prevCue && (cue.start < prevCue.end - 1); // 1ms tolerance
+        
         return (
           <div 
             key={cue.id} 
@@ -363,7 +388,9 @@ const CueList: React.FC<CueListProps> = ({ cues, onChange, onEditWords, currentM
               group relative rounded-2xl p-5 md:p-6 transition-all duration-300 flex flex-col md:flex-row gap-6 md:gap-10 items-start border
               ${isActive 
                 ? 'bg-primary-50 dark:bg-primary-900/20 border-primary-400 dark:border-primary-600 shadow-xl shadow-primary-500/10 scale-[1.01] z-10' 
-                : 'bg-white dark:bg-neutral-900 border-neutral-200 dark:border-neutral-800 shadow-sm hover:shadow-md'
+                : isSelected
+                    ? 'bg-blue-50 dark:bg-blue-900/10 border-blue-300 dark:border-blue-700'
+                    : 'bg-white dark:bg-neutral-900 border-neutral-200 dark:border-neutral-800 shadow-sm hover:shadow-md'
               }
               ${isDragging ? 'opacity-40 border-dashed border-primary-500' : ''}
               cursor-default
@@ -380,6 +407,16 @@ const CueList: React.FC<CueListProps> = ({ cues, onChange, onEditWords, currentM
                  <div className="absolute right-0 top-1/2 -translate-y-1/2 w-2 h-2 bg-primary-500 rounded-full"></div>
               </div>
             )}
+            
+            {/* Selection Checkbox */}
+             <div className="absolute -left-3 md:-left-4 top-1/2 -translate-y-1/2 z-20">
+                <button
+                    onClick={(e) => { e.stopPropagation(); onToggleSelection(cue.id, e.shiftKey); }}
+                    className={`p-1.5 rounded-lg transition-all ${isSelected ? 'text-blue-600 bg-white shadow-sm dark:bg-neutral-800 dark:text-blue-400' : 'text-neutral-300 hover:text-neutral-500 dark:text-neutral-700 dark:hover:text-neutral-500'}`}
+                >
+                    {isSelected ? <CheckSquare size={20} fill="currentColor" className="text-blue-100 dark:text-blue-900" /> : <Square size={20} />}
+                </button>
+             </div>
 
             {/* Desktop Index & Grip */}
             <div 
@@ -389,7 +426,14 @@ const CueList: React.FC<CueListProps> = ({ cues, onChange, onEditWords, currentM
               className="absolute left-3 top-1/2 -translate-y-1/2 text-neutral-300 dark:text-neutral-700 hidden md:flex items-center gap-2 cursor-grab active:cursor-grabbing hover:text-primary-500 transition-colors p-2 -ml-2 select-none"
             >
                 <GripVertical size={20} />
-                <span className={`text-sm font-mono font-medium min-w-[1.5rem] ${isActive ? 'text-primary-600' : ''}`}>{index + 1}</span>
+                <span className={`text-sm font-mono font-medium min-w-[1.5rem] flex items-center gap-1 ${isActive ? 'text-primary-600' : ''}`}>
+                    {index + 1}
+                    {isLineOverlap && (
+                        <div className="text-red-500 animate-pulse" title={`Overlap warning: Starts before Line ${index} ends`}>
+                            <AlertCircle size={14} />
+                        </div>
+                    )}
+                </span>
             </div>
 
             {/* Mobile Index / Handle */}
@@ -401,16 +445,18 @@ const CueList: React.FC<CueListProps> = ({ cues, onChange, onEditWords, currentM
             >
               <GripVertical size={16} />
               #{index + 1}
+              {isLineOverlap && <AlertCircle size={14} className="text-red-500" />}
             </div>
 
             {/* Timing Controls */}
-            <div className="flex flex-col gap-3 w-full md:w-64 mt-8 md:mt-0 md:ml-10 shrink-0">
+            {/* Added extra margin to prevent overlap with index/grip on desktop */}
+            <div className="flex flex-col gap-3 w-full md:w-64 mt-8 md:mt-0 md:ml-28 shrink-0">
                <div className="flex flex-row md:flex-col gap-3">
                   <TimeInput 
                     ms={cue.start} 
                     onChange={(val) => updateCue(index, 'start', val)}
                     label="Start"
-                    className="flex-1"
+                    className={`flex-1 ${isLineOverlap ? 'ring-1 ring-red-500 rounded-lg' : ''}`}
                   />
                   <TimeInput 
                     ms={cue.end} 
@@ -440,24 +486,56 @@ const CueList: React.FC<CueListProps> = ({ cues, onChange, onEditWords, currentM
               {viewMode === 'word' ? (
                  <div className="pl-12 w-full">
                     <div className="flex flex-wrap gap-2">
-                      {getDisplayWords(cue, index).map((word, wIdx) => {
+                      {getDisplayWords(cue, index).map((word, wIdx, allWords) => {
                         const wordStart = word.start || 0;
                         const wordEnd = word.end || (wordStart + 300);
                         const isWordActive = currentMillis >= wordStart && currentMillis < wordEnd;
+                        
+                        // --- Overlap Detection (Words) ---
+                        // 1. Previous word end > Current word start (Overlap)
+                        // 2. Previous word start > Current word start (Out of order)
+                        const prevWord = wIdx > 0 ? allWords[wIdx - 1] : null;
+                        const isOverlap = prevWord && (wordStart < (prevWord.end || 0) - 1);
+                        const isOutOfOrder = prevWord && (wordStart < (prevWord.start || 0));
+                        const isInvalidDuration = wordStart > wordEnd;
+                        
+                        // New Check: Last word ends after line ends
+                        const isLineEndIssue = (wIdx === allWords.length - 1) && (wordEnd > cue.end);
+
+                        const hasIssue = isOverlap || isOutOfOrder || isInvalidDuration || isLineEndIssue;
+                        let issueTitle = "Click to play";
+                        if (isOverlap) issueTitle = "Overlap: Starts before previous word ends";
+                        if (isOutOfOrder) issueTitle = "Out of Order: Starts before previous word starts";
+                        if (isInvalidDuration) issueTitle = "Invalid: End time is before start time";
+                        if (isLineEndIssue) issueTitle = "Overflow: Word ends after line ends";
 
                         return (
                           <div 
                             key={word.id || wIdx} 
-                            className={`flex flex-col items-center p-2 rounded-lg border transition-all duration-200 
+                            onClick={(e) => {
+                                e.stopPropagation();
+                                onSeek && onSeek(wordStart, true);
+                            }}
+                            title={issueTitle}
+                            className={`flex flex-col items-center p-2 rounded-lg border transition-all duration-200 cursor-pointer select-none relative
                                 ${isWordActive 
                                     ? 'bg-primary-100 dark:bg-primary-900/40 border-primary-500 scale-105 shadow-md z-10' 
-                                    : 'bg-neutral-100 dark:bg-neutral-800 border-neutral-200 dark:border-neutral-700'
+                                    : hasIssue 
+                                        ? 'bg-red-50 dark:bg-red-900/20 border-red-400 dark:border-red-600'
+                                        : 'bg-neutral-100 dark:bg-neutral-800 border-neutral-200 dark:border-neutral-700 hover:border-primary-300 dark:hover:border-primary-700'
                                 }
                             `}
                           >
-                             <div className="flex items-center gap-1 mb-1 bg-white dark:bg-neutral-900 rounded border border-neutral-200 dark:border-neutral-700 p-0.5">
+                             {/* Word Overlap Indicator */}
+                             {hasIssue && (
+                                 <div className="absolute -top-1 -right-1 bg-red-500 text-white rounded-full p-0.5 z-20 shadow-sm">
+                                    <AlertCircle size={10} />
+                                 </div>
+                             )}
+
+                             <div className="flex items-center gap-1 mb-1 bg-white dark:bg-neutral-900 rounded border border-neutral-200 dark:border-neutral-700 p-0.5" onClick={(e) => e.stopPropagation()}>
                                <button 
-                                 onClick={() => updateWordInCue(index, wIdx, 'start', wordStart - 100)}
+                                 onClick={(e) => { e.stopPropagation(); updateWordInCue(index, wIdx, 'start', wordStart - 100); }}
                                  className="p-1 text-neutral-400 hover:text-primary-600 hover:bg-neutral-100 dark:hover:bg-neutral-800 rounded transition"
                                  title="-0.1s"
                                >
@@ -468,7 +546,7 @@ const CueList: React.FC<CueListProps> = ({ cues, onChange, onEditWords, currentM
                                   onChange={(val) => updateWordInCue(index, wIdx, 'start', val)}
                                />
                                <button 
-                                 onClick={() => updateWordInCue(index, wIdx, 'start', wordStart + 100)}
+                                 onClick={(e) => { e.stopPropagation(); updateWordInCue(index, wIdx, 'start', wordStart + 100); }}
                                  className="p-1 text-neutral-400 hover:text-primary-600 hover:bg-neutral-100 dark:hover:bg-neutral-800 rounded transition"
                                  title="+0.1s"
                                >
@@ -488,7 +566,7 @@ const CueList: React.FC<CueListProps> = ({ cues, onChange, onEditWords, currentM
                       })}
                     </div>
                     <p className="mt-2 text-xs text-neutral-400">
-                      Edit individual words above. Changes will sync to the line text.
+                      Click words to play. Edit timings above. First word syncs with line start.
                     </p>
                     <div className="flex items-center gap-3 mt-4">
                        <button 

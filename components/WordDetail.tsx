@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { Word, Cue } from '../types';
-import { msToLrc, timeToMs } from '../utils/timeUtils';
+import { msToLrc, msToMmSsMmm, timeToMs } from '../utils/timeUtils';
 import { X, Check, Plus, Trash2, Minus, Ban } from 'lucide-react';
 
 interface WordDetailProps {
@@ -11,12 +11,13 @@ interface WordDetailProps {
 
 // Local component to handle input state for timestamps to avoid cursor jumping
 const LocalTimeInput = ({ ms, onChange }: { ms: number, onChange: (val: number) => void }) => {
-    const [localText, setLocalText] = useState(msToLrc(ms));
+    // Use msToMmSsMmm for 3 digit precision (00:00.000)
+    const [localText, setLocalText] = useState(msToMmSsMmm(ms));
     const [isFocused, setIsFocused] = useState(false);
   
     useEffect(() => {
       if (!isFocused) {
-        setLocalText(msToLrc(ms));
+        setLocalText(msToMmSsMmm(ms));
       }
     }, [ms, isFocused]);
   
@@ -35,13 +36,13 @@ const LocalTimeInput = ({ ms, onChange }: { ms: number, onChange: (val: number) 
             e.preventDefault();
             const newVal = Math.max(0, ms - 100);
             onChange(newVal);
-            setLocalText(msToLrc(newVal));
+            setLocalText(msToMmSsMmm(newVal));
         }
         if (e.key === '+' || e.key === '=') {
             e.preventDefault();
             const newVal = ms + 100;
             onChange(newVal);
-            setLocalText(msToLrc(newVal));
+            setLocalText(msToMmSsMmm(newVal));
         }
     };
   
@@ -54,7 +55,7 @@ const LocalTimeInput = ({ ms, onChange }: { ms: number, onChange: (val: number) 
             onBlur={() => { setIsFocused(false); commitChange(); }}
             onKeyDown={handleKeyDown}
             className="w-24 px-2 py-2 bg-neutral-100 dark:bg-neutral-800 border border-neutral-300 dark:border-neutral-700 rounded-lg font-mono text-base text-center focus:ring-2 focus:ring-primary-500 outline-none"
-            placeholder="00:00.00"
+            placeholder="00:00.000"
         />
     );
 };
@@ -115,7 +116,7 @@ const WordDetail: React.FC<WordDetailProps> = ({ cue, onSave, onClose }) => {
         
         <div className="p-6 overflow-y-auto flex-1 space-y-4">
           <div className="text-base text-neutral-500 dark:text-neutral-400 mb-6 bg-primary-50 dark:bg-primary-900/20 p-4 rounded-xl border border-primary-100 dark:border-primary-800">
-             Base line time: <span className="font-mono font-bold text-neutral-700 dark:text-neutral-300">{msToLrc(cue.start)}</span>
+             Base line time: <span className="font-mono font-bold text-neutral-700 dark:text-neutral-300">{msToMmSsMmm(cue.start)}</span>
              <br/>
              Enhanced LRC uses word start times.
           </div>
@@ -171,7 +172,8 @@ const WordDetail: React.FC<WordDetailProps> = ({ cue, onSave, onClose }) => {
 
         <div className="p-5 border-t border-neutral-200 dark:border-neutral-800 bg-neutral-50 dark:bg-neutral-800/50 flex justify-between items-center">
           <button
-             onClick={() => onSave(undefined)}
+             type="button"
+             onClick={(e) => { e.preventDefault(); e.stopPropagation(); onSave(undefined); }}
              className="px-4 py-2.5 text-red-500 hover:text-red-600 hover:bg-red-50 dark:hover:bg-red-900/20 rounded-xl text-sm font-medium transition flex items-center gap-2"
              title="Remove word-level timing data for this line"
           >

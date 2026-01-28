@@ -1,4 +1,5 @@
 
+
 import { GoogleGenAI, Type } from "@google/genai";
 import { Cue, Word } from '../types';
 
@@ -41,7 +42,7 @@ export const transcribeAudio = async (
     throw new Error("File size exceeds 20MB limit for inline media. Please use a smaller file or split the audio.");
   }
 
-  const modelName = options.model || 'gemini-3-flash-preview';
+  const modelName = options.model || 'gemini-2.5-flash';
   
   const audioPart = await fileToPart(file);
 
@@ -131,7 +132,7 @@ export const transcribeAudio = async (
 
 export const generateLyrics = async (
   topic: string, 
-  model: string = 'gemini-3-flash-preview'
+  model: string = 'gemini-2.5-flash'
 ): Promise<Cue[]> => {
   const prompt = `Generate song lyrics about: "${topic}". 
   Return the result as a plain text string with line breaks. 
@@ -190,7 +191,7 @@ export const generateLyrics = async (
 export const refineLyrics = async (
   cues: Cue[], 
   instruction: string, 
-  model: string = 'gemini-3-flash-preview'
+  model: string = 'gemini-2.5-flash'
 ): Promise<Cue[]> => {
   const simplifiedCues = cues.map(c => ({ id: c.id, text: c.text }));
   

@@ -59,8 +59,8 @@ const AIAssistant: React.FC<AIAssistantProps> = ({ cues, onApply, onClose }) => 
       <div className="bg-white dark:bg-neutral-900 rounded-3xl shadow-2xl w-full max-w-lg border border-neutral-200 dark:border-neutral-800 flex flex-col overflow-hidden animate-in fade-in zoom-in-95 duration-200">
         
         {/* Header */}
-        <div className="p-5 border-b border-neutral-200 dark:border-neutral-800 flex justify-between items-center bg-gradient-to-r from-indigo-50 to-purple-50 dark:from-indigo-950/30 dark:to-purple-950/30">
-          <h3 className="font-bold text-xl flex items-center gap-2 text-indigo-700 dark:text-indigo-300">
+        <div className="p-5 border-b border-neutral-200 dark:border-neutral-800 flex justify-between items-center bg-gradient-to-r from-orange-50 to-amber-50 dark:from-orange-950/30 dark:to-amber-950/30">
+          <h3 className="font-bold text-xl flex items-center gap-2 text-orange-700 dark:text-orange-300">
             <Sparkles size={20} /> AI Assistant
           </h3>
           <button onClick={onClose} className="p-2 hover:bg-white/50 dark:hover:bg-black/20 rounded-full transition text-neutral-500">
@@ -75,13 +75,13 @@ const AIAssistant: React.FC<AIAssistantProps> = ({ cues, onApply, onClose }) => 
            <div className="flex p-1 bg-neutral-100 dark:bg-neutral-800 rounded-xl">
               <button 
                 onClick={() => setMode('refine')}
-                className={`flex-1 py-2 rounded-lg text-sm font-medium transition flex items-center justify-center gap-2 ${mode === 'refine' ? 'bg-white dark:bg-neutral-700 shadow-sm text-indigo-600 dark:text-indigo-300' : 'text-neutral-500 hover:text-neutral-700 dark:hover:text-neutral-300'}`}
+                className={`flex-1 py-2 rounded-lg text-sm font-medium transition flex items-center justify-center gap-2 ${mode === 'refine' ? 'bg-white dark:bg-neutral-700 shadow-sm text-orange-600 dark:text-orange-300' : 'text-neutral-500 hover:text-neutral-700 dark:hover:text-neutral-300'}`}
               >
                 <Wand2 size={16} /> Refine Lyrics
               </button>
               <button 
                 onClick={() => setMode('generate')}
-                className={`flex-1 py-2 rounded-lg text-sm font-medium transition flex items-center justify-center gap-2 ${mode === 'generate' ? 'bg-white dark:bg-neutral-700 shadow-sm text-indigo-600 dark:text-indigo-300' : 'text-neutral-500 hover:text-neutral-700 dark:hover:text-neutral-300'}`}
+                className={`flex-1 py-2 rounded-lg text-sm font-medium transition flex items-center justify-center gap-2 ${mode === 'generate' ? 'bg-white dark:bg-neutral-700 shadow-sm text-orange-600 dark:text-orange-300' : 'text-neutral-500 hover:text-neutral-700 dark:hover:text-neutral-300'}`}
               >
                 <Sparkles size={16} /> Generate New
               </button>
@@ -93,7 +93,7 @@ const AIAssistant: React.FC<AIAssistantProps> = ({ cues, onApply, onClose }) => 
              <select 
                value={model}
                onChange={(e) => setModel(e.target.value)}
-               className="w-full px-4 py-2 bg-neutral-50 dark:bg-neutral-800 border border-neutral-200 dark:border-neutral-700 rounded-xl text-sm outline-none focus:ring-2 focus:ring-indigo-500"
+               className="w-full px-4 py-2 bg-neutral-50 dark:bg-neutral-800 border border-neutral-200 dark:border-neutral-700 rounded-xl text-sm outline-none focus:ring-2 focus:ring-orange-500"
              >
                 <option value="gemini-2.5-flash">Gemini 2.5 Flash</option>
                 <option value="gemini-3-flash-preview">Gemini 3.0 Flash</option>
@@ -110,14 +110,14 @@ const AIAssistant: React.FC<AIAssistantProps> = ({ cues, onApply, onClose }) => 
                value={prompt}
                onChange={(e) => setPrompt(e.target.value)}
                placeholder={mode === 'refine' ? "e.g., Translate to Spanish, Fix grammar, Make it rhyme..." : "e.g., A heartbreak song about rainy days in London..."}
-               className="flex-1 w-full p-4 bg-neutral-50 dark:bg-neutral-800 border border-neutral-200 dark:border-neutral-700 rounded-xl outline-none focus:ring-2 focus:ring-indigo-500 resize-none text-base"
+               className="flex-1 w-full p-4 bg-neutral-50 dark:bg-neutral-800 border border-neutral-200 dark:border-neutral-700 rounded-xl outline-none focus:ring-2 focus:ring-orange-500 resize-none text-base"
              />
            </div>
            
            <button 
              onClick={handleAction}
              disabled={isLoading || !prompt.trim()}
-             className="w-full py-4 bg-indigo-600 hover:bg-indigo-700 disabled:opacity-50 disabled:cursor-not-allowed text-white rounded-xl font-semibold text-lg shadow-lg shadow-indigo-500/30 flex items-center justify-center gap-2 transition-all active:scale-[0.98]"
+             className="w-full py-4 bg-gradient-to-r from-orange-500 to-red-600 hover:from-orange-600 hover:to-red-700 disabled:opacity-50 disabled:cursor-not-allowed text-white rounded-xl font-semibold text-lg shadow-lg shadow-orange-500/30 flex items-center justify-center gap-2 transition-all active:scale-[0.98]"
            >
              {isLoading ? <Loader2 className="animate-spin" /> : <Send size={20} />}
              {isLoading ? 'Processing...' : (mode === 'refine' ? 'Refine Text' : 'Generate Lyrics')}

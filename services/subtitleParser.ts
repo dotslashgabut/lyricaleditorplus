@@ -24,13 +24,28 @@ export const detectFormat = (filename: string, content: string): SubtitleFormat 
   return SubtitleFormat.SRT; // Default
 };
 
+// --- Helpers ---
+
+const decodeEntities = (str: string) => {
+  return str
+    .replace(/&amp;/g, '&')
+    .replace(/&lt;/g, '<')
+    .replace(/&gt;/g, '>')
+    .replace(/&quot;/g, '"')
+    .replace(/&apos;/g, "'")
+    .replace(/&#(\d+);/g, (_, dec) => String.fromCharCode(dec))
+    .replace(/&#x([a-fA-F0-9]+);/g, (_, hex) => String.fromCharCode(parseInt(hex, 16)));
+};
+
 // --- Parsers ---
 
 const parseLRC = (content: string): ParseResult => {
   const lines = content.split(/\r?\n/);
   const cues: Cue[] = [];
   const regex = /\[(\d{2}:\d{2}(?:\.\d{2,3})?)\](.*)/;
-  const wordRegex = /<(\d{2}:\d{2}(?:\.\d{2,3})?)>([^<]*)/g;
+  // Improved regex: Allow optional hours (H:MM:SS), and handle various bracket styles if needed
+  // This matches <00:00.00> or <00:00:00.000>
+  const wordRegex = /<(\d{1,2}:\d{2}(?::\d{2})?(?:\.\d{1,3})?)>([^<]*)/g;
   
   const metadata: Metadata = {};
 
@@ -48,8 +63,11 @@ const parseLRC = (content: string): ParseResult => {
     const match = line.match(regex);
     if (match) {
       const start = timeToMs(match[1]);
-      const rawText = match[2];
+      let rawText = match[2];
       
+      // Decode entities immediately
+      rawText = decodeEntities(rawText);
+
       // Check for Enhanced LRC words
       let text = rawText;
       let words: Word[] = [];
@@ -105,7 +123,8 @@ const parseSRT = (content: string): ParseResult => {
 
     const start = timeToMs(times[0].trim());
     const end = timeToMs(times[1].trim());
-    const text = lines.slice(timeLineIndex + 1).join('\n');
+    const rawText = lines.slice(timeLineIndex + 1).join('\n');
+    const text = decodeEntities(rawText);
 
     return {
       id: `srt-${index}`,
@@ -141,7 +160,7 @@ const parseVTT = (content: string): ParseResult => {
     
     if (line.includes('-->')) {
       if (currentCue && textBuffer.length > 0) {
-        currentCue.text = textBuffer.join('\n');
+        currentCue.text = decodeEntities(textBuffer.join('\n'));
         if (wordBuffer.length > 0) currentCue.words = wordBuffer;
         cues.push(currentCue as Cue);
         textBuffer = [];
@@ -160,7 +179,7 @@ const parseVTT = (content: string): ParseResult => {
       };
     } else if (line === '' && currentCue) {
       if (textBuffer.length > 0) {
-        currentCue.text = textBuffer.join('\n');
+        currentCue.text = decodeEntities(textBuffer.join('\n'));
         if (wordBuffer.length > 0) currentCue.words = wordBuffer;
         cues.push(currentCue as Cue);
         currentCue = null;
@@ -168,43 +187,64 @@ const parseVTT = (content: string): ParseResult => {
         wordBuffer = [];
       }
     } else if (currentCue) {
+      // VTT Karaoke / timestamps
       const timestampRegex = /<(\d{2}:\d{2}(?::\d{2})?[.,]\d{3})>/g;
-      const cleanLine = line.replace(/<[^>]+>/g, '').trim();
-      textBuffer.push(cleanLine);
-
+      
       if (timestampRegex.test(line)) {
+        // We need to parse words and times
+        // The line might look like: <00:01.000>Word <00:01.500>Word2
+        
         timestampRegex.lastIndex = 0;
         const parts = line.split(timestampRegex);
+        // parts[0] = text before first timestamp (often empty)
+        // parts[1] = first timestamp
+        // parts[2] = text after first timestamp
+        // ...
+        
         let currentTime = currentCue.start || 0;
         
-        for (let k = 0; k < parts.length; k += 2) {
-           const textPart = parts[k];
-           const timePart = parts[k+1];
-           const cleanText = textPart.replace(/<[^>]+>/g, '').trim();
+        for (let k = 0; k < parts.length; k++) {
+           const part = parts[k];
+           // If it matches timestamp format, it's a time. Else it is text.
+           // However, split separates by the capturing group.
+           // Index 0: Text
+           // Index 1: Time
+           // Index 2: Text
+           // Index 3: Time
            
-           if (cleanText) {
-             const wordsInPart = cleanText.split(/\s+/);
-             const durationPerWord = (timePart ? (timeToMs(timePart) - currentTime) : 0) / wordsInPart.length;
-             
-             wordsInPart.forEach((w, wIdx) => {
-                wordBuffer.push({
-                   id: `vtt-w-${i}-${wordBuffer.length}`,
-                   text: w,
-                   start: currentTime + (durationPerWord * wIdx),
-                });
-             });
-           }
-           
-           if (timePart) {
-             currentTime = timeToMs(timePart);
+           if (k % 2 === 1) { 
+               // This is a timestamp
+               currentTime = timeToMs(part);
+           } else {
+               // This is text
+               const cleanText = part.replace(/<[^>]+>/g, '').trim(); // Remove other tags
+               const decodedText = decodeEntities(cleanText);
+               
+               if (decodedText) {
+                   // Add word with current timestamp
+                   wordBuffer.push({
+                       id: `vtt-w-${i}-${wordBuffer.length}`,
+                       text: decodedText,
+                       start: currentTime
+                       // end will be next timestamp or cue end
+                   });
+               }
            }
         }
+        
+        // Clean line for main text
+        const cleanLine = line.replace(/<[^>]+>/g, '').trim();
+        textBuffer.push(cleanLine);
+        
+      } else {
+        const cleanLine = line.replace(/<[^>]+>/g, '').trim();
+        textBuffer.push(cleanLine);
       }
     }
   }
 
   if (currentCue && textBuffer.length > 0) {
-    currentCue.text = textBuffer.join('\n');
+    currentCue.text = decodeEntities(textBuffer.join('\n'));
     if (wordBuffer.length > 0) currentCue.words = wordBuffer;
     cues.push(currentCue as Cue);
   }
@@ -244,7 +284,27 @@ const parseTTML = (content: string): ParseResult => {
     const end = p.getAttribute("end");
     const dur = p.getAttribute("dur");
     
-    // Flatten text: replace newlines inside the tag with space, clean up excessive space
+    // Extract text and words if spans exist
+    const words: Word[] = [];
+    const spans = p.getElementsByTagName("span");
+    
+    if (spans.length > 0) {
+        for (let j = 0; j < spans.length; j++) {
+            const span = spans[j];
+            const spanBegin = span.getAttribute("begin");
+            const spanEnd = span.getAttribute("end");
+            const text = span.textContent || "";
+            if (text.trim()) {
+                words.push({
+                    id: `ttml-w-${i}-${j}`,
+                    text: decodeEntities(text.trim()),
+                    start: spanBegin ? timeToMs(spanBegin) : undefined,
+                    end: spanEnd ? timeToMs(spanEnd) : undefined
+                });
+            }
+        }
+    }
+
     const rawText = extractText(p);
     const text = rawText.replace(/\s+/g, ' ').trim(); 
     
@@ -256,7 +316,8 @@ const parseTTML = (content: string): ParseResult => {
       id: `ttml-${i}`,
       start: startMs,
       end: endMs,
-      text: text
+      text: decodeEntities(text),
+      words: words.length > 0 ? words : undefined
     });
   }
   return { cues, metadata: {} };
@@ -272,12 +333,13 @@ const parseJSON = (content: string): ParseResult => {
         const cues = cuesRaw.map((c: any, i: number) => {
             const start = typeof c.start === 'number' ? c.start : timeToMs(String(c.start || '0'));
             const end = typeof c.end === 'number' ? c.end : timeToMs(String(c.end || '0'));
+            const text = decodeEntities(c.text || '');
             
             let words: Word[] | undefined = undefined;
             if (Array.isArray(c.words)) {
                 words = c.words.map((w: any, wi: number) => ({
                     id: w.id || `json-w-${i}-${wi}`,
-                    text: w.text || '',
+                    text: decodeEntities(w.text || ''),
                     // Ensure word timestamps are also numbers
                     start: typeof w.start === 'number' ? w.start : timeToMs(String(w.start || '0')),
                     end: typeof w.end === 'number' ? w.end : (w.end ? timeToMs(String(w.end)) : undefined)
@@ -288,7 +350,7 @@ const parseJSON = (content: string): ParseResult => {
                 id: c.id || `json-${i}`,
                 start,
                 end,
-                text: c.text || '',
+                text,
                 words
             };
         });
@@ -346,22 +408,61 @@ const stringifyVTT = (cues: Cue[], karaoke: boolean = false, metadata?: Metadata
   }).join('\n');
 };
 
-const stringifyTTML = (cues: Cue[], karaoke: boolean = false): string => {
+const escapeXML = (str: string) => {
+  return str.replace(/&/g, '&amp;')
+            .replace(/</g, '&lt;')
+            .replace(/>/g, '&gt;');
+            // Quotes (' and ") do not need to be escaped in XML text content.
+};
+
+const stringifyTTML = (cues: Cue[], karaoke: boolean = false, metadata?: Metadata): string => {
+  let head = '';
+  if (metadata) {
+    let metaItems = '';
+    if (metadata.title) metaItems += `      <ttm:title>${escapeXML(metadata.title)}</ttm:title>\n`;
+    if (metadata.artist) metaItems += `      <ttm:agent type="person" role="artist">${escapeXML(metadata.artist)}</ttm:agent>\n`;
+    if (metadata.album) metaItems += `      <ttm:desc>Album: ${escapeXML(metadata.album)}</ttm:desc>\n`;
+    if (metadata.by) metaItems += `      <ttm:copyright>By: ${escapeXML(metadata.by)}</ttm:copyright>\n`;
+    
+    if (metaItems) {
+      head = `
+  <head>
+    <metadata>
+${metaItems}    </metadata>
+  </head>`;
+    }
+  }
+
   const body = cues.map(cue => {
-    let content = cue.text.replace(/\n/g, '<br/>');
+    let content = escapeXML(cue.text).replace(/\n/g, '<br/>');
+    
     if (karaoke && cue.words && cue.words.length > 0) {
-       const spans = cue.words.map(w => {
-         const startOffset = Math.max(0, (w.start || cue.start) - cue.start);
-         let endOffset = Math.max(0, (w.end || ((w.start || cue.start) + 300)) - cue.start);
-         return `<span begin="${msToVtt(startOffset)}" end="${msToVtt(endOffset)}">${w.text}</span>`;
+       // TTML Logic: Use absolute timestamps for spans, matching the paragraph context.
+       const spans = cue.words.map((w, i, arr) => {
+         const wordStart = w.start || cue.start;
+         let wordEnd = w.end || (wordStart + 300);
+         
+         // Fix overlap for export: Clamp end time to next word's start if overlapping
+         if (i < arr.length - 1) {
+             const nextWord = arr[i + 1];
+             const nextStart = nextWord.start || wordEnd; 
+             if (wordEnd > nextStart) {
+                 wordEnd = nextStart;
+             }
+         }
+         
+         return `<span begin="${msToVtt(wordStart)}" end="${msToVtt(wordEnd)}">${escapeXML(w.text)}</span>`;
        });
+       // Replace raw text with spans
        content = '\n' + spans.map(s => `        ${s}`).join('\n') + '\n      ';
     }
+    
     return `      <p begin="${msToVtt(cue.start)}" end="${msToVtt(cue.end)}">${content}</p>`;
   }).join('\n');
 
   return `<?xml version="1.0" encoding="UTF-8"?>
-<tt xmlns="http://www.w3.org/ns/ttml" lang="en">
+<tt xmlns="http://www.w3.org/ns/ttml" xmlns:ttm="http://www.w3.org/ns/ttml#metadata" lang="en">
+${head}
   <body>
     <div>
 ${body}
@@ -439,9 +540,9 @@ export const stringifyContent = (cues: Cue[], format: SubtitleFormat, metadata?:
     case SubtitleFormat.VTT_KARAOKE:
       return stringifyVTT(cues, true, metadata);
     case SubtitleFormat.TTML:
-      return stringifyTTML(cues, false);
+      return stringifyTTML(cues, false, metadata);
     case SubtitleFormat.TTML_KARAOKE:
-      return stringifyTTML(cues, true);
+      return stringifyTTML(cues, true, metadata);
     case SubtitleFormat.TXT:
       return stringifyTXT(cues);
     case SubtitleFormat.JSON:

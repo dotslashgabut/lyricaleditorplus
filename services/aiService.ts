@@ -349,7 +349,8 @@ export const playTTS = async (text: string) => {
     
     const requestId = activeRequestId;
 
-    if (!text.trim()) return;
+    let textToSpeak = text.trim();
+    if (!textToSpeak) return;
 
     if (!ttsAudioContext) {
         ttsAudioContext = new (window.AudioContext || (window as any).webkitAudioContext)({ sampleRate: 24000 });
@@ -360,10 +361,17 @@ export const playTTS = async (text: string) => {
       await ttsAudioContext.resume();
     }
 
+    // WORKAROUND: For very short text (likely single words), appending punctuation 
+    // helps the model recognize it as a distinct utterance to pronounce.
+    // Otherwise, it might treat it as a fragment or silence and return no audio.
+    if (textToSpeak.length < 5 && !/[.?!,;:]$/.test(textToSpeak)) {
+        textToSpeak += ".";
+    }
+
     try {
         const response = await ai.models.generateContent({
             model: "gemini-2.5-flash-preview-tts",
-            contents: [{ parts: [{ text }] }],
+            contents: [{ parts: [{ text: textToSpeak }] }],
             config: {
                 // Use string cast for Modality to prevent potential Enum issues at runtime with some bundlers
                 responseModalities: ['AUDIO' as Modality], 
@@ -387,9 +395,11 @@ export const playTTS = async (text: string) => {
                 throw new Error("TTS failed: The model returned text instead of audio. Please try again.");
             }
             if (response.candidates?.[0]?.finishReason) {
+                 // Check safety ratings or other reasons if available in full log
+                 console.warn("TTS Finish Reason:", response.candidates[0].finishReason);
                  throw new Error(`TTS generation stopped. Reason: ${response.candidates[0].finishReason}`);
             }
-            throw new Error("No audio data returned from TTS. The response might be empty.");
+            throw new Error("No audio data returned from TTS. The word might be too short or filtered.");
         }
 
         const audioBuffer = await decodeAudioData(

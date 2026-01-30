@@ -149,6 +149,7 @@ export function App() {
   const [sidebarTranscribeModel, setSidebarTranscribeModel] = useState('gemini-2.5-flash'); // Separate state for sidebar
   const [transcribeMode, setTranscribeMode] = useState<'lines' | 'words'>('lines');
   const [isTranscribing, setIsTranscribing] = useState(false);
+  const transcriptionAbortCtrl = useRef<AbortController | null>(null);
 
   // Apply Theme
   useEffect(() => {
@@ -481,17 +482,36 @@ export function App() {
       }
   };
 
+  const stopTranscription = () => {
+      if (transcriptionAbortCtrl.current) {
+          transcriptionAbortCtrl.current.abort();
+          transcriptionAbortCtrl.current = null;
+      }
+      setIsTranscribing(false);
+  };
+
   // Re-usable transcribe function
   const runTranscription = async (model: string) => {
       if (!mediaFile) return;
+      
+      // Stop any existing
+      if (transcriptionAbortCtrl.current) {
+          transcriptionAbortCtrl.current.abort();
+      }
+      
+      const controller = new AbortController();
+      transcriptionAbortCtrl.current = controller;
+      
       setIsTranscribing(true);
       try {
           const cues = await transcribeAudio(mediaFile, {
              model: model,
              mode: transcribeMode
-          });
+          }, controller.signal);
           
           if (cues.length === 0) {
+             // If manual stop, we might return empty or throw. transcribeAudio throws on abort.
+             // If we get here with empty list and it wasn't aborted, then API returned no data.
              alert("Transcription returned no data.");
           } else {
             // If on home screen
@@ -512,11 +532,18 @@ export function App() {
             }
           }
       } catch (e: any) {
-          console.error(e);
-          const msg = e.message || 'Transcription failed';
-          alert(`Error: ${msg}. Please check API Key and file size.`);
+          if (e.message === "Transcription cancelled by user." || e.name === 'AbortError') {
+              console.log("Transcription aborted");
+          } else {
+              console.error(e);
+              const msg = e.message || 'Transcription failed';
+              alert(`Error: ${msg}. Please check API Key and file size.`);
+          }
       } finally {
-          setIsTranscribing(false);
+          if (transcriptionAbortCtrl.current === controller) {
+              setIsTranscribing(false);
+              transcriptionAbortCtrl.current = null;
+          }
       }
   };
 
@@ -1047,12 +1074,18 @@ export function App() {
                                 </div>
                             </div>
                             <button 
-                                onClick={handleHomeTranscribe}
-                                disabled={isTranscribing}
-                                className="w-full bg-green-600 hover:bg-green-700 text-white py-2.5 rounded-xl text-sm font-semibold shadow-lg shadow-green-500/20 disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-2"
+                                onClick={isTranscribing ? stopTranscription : handleHomeTranscribe}
+                                className={`w-full py-2.5 rounded-xl text-sm font-semibold shadow-lg flex items-center justify-center gap-2 transition ${
+                                    isTranscribing 
+                                    ? 'bg-red-500 hover:bg-red-600 text-white shadow-red-500/20' 
+                                    : 'bg-green-600 hover:bg-green-700 text-white shadow-green-500/20 disabled:opacity-50 disabled:cursor-not-allowed'
+                                }`}
                             >
-                                {isTranscribing ? <Loader2 size={16} className="animate-spin" /> : <Mic size={16} />}
-                                Start Transcription
+                                {isTranscribing ? (
+                                    <> <Loader2 size={16} className="animate-spin" /> Stop Transcription </>
+                                ) : (
+                                    <> <Mic size={16} /> Start Transcription </>
+                                )}
                             </button>
                         </>
                     ) : (
@@ -1227,7 +1260,6 @@ export function App() {
              transition-all duration-300 ease-in-out bg-neutral-50 dark:bg-neutral-900 border-r border-neutral-200 dark:border-neutral-800 flex flex-col z-50
              ${isVideoVisible ? 'fixed inset-x-0 bottom-0 top-16 md:relative md:top-auto md:w-[400px] lg:w-[450px] md:inset-auto' : 'w-0 border-none overflow-hidden'}
          `}>
-             {/* ... Sidebar Content ... */}
              {/* Sidebar Tabs */}
              <div className="flex border-b border-neutral-200 dark:border-neutral-800 bg-white dark:bg-neutral-900 relative">
                 <button 
@@ -1316,12 +1348,14 @@ export function App() {
                                    </select>
                                 </div>
                                 <button 
-                                   onClick={handleSidebarTranscribe}
-                                   disabled={isTranscribing}
-                                   className="w-full flex items-center justify-center gap-2 px-4 py-2.5 bg-neutral-900 dark:bg-white text-white dark:text-neutral-900 rounded-xl text-sm font-bold hover:opacity-90 transition disabled:opacity-50"
+                                   onClick={isTranscribing ? stopTranscription : handleSidebarTranscribe}
+                                   className={`w-full flex items-center justify-center gap-2 px-4 py-2.5 rounded-xl text-sm font-bold transition ${isTranscribing ? 'bg-red-500 hover:bg-red-600 text-white' : 'bg-neutral-900 dark:bg-white text-white dark:text-neutral-900 hover:opacity-90'}`}
                                 >
-                                   {isTranscribing ? <Loader2 size={16} className="animate-spin" /> : <RefreshCw size={16} />} 
-                                   Re-Transcribe
+                                   {isTranscribing ? (
+                                       <> <Loader2 size={16} className="animate-spin" /> Stop </>
+                                   ) : (
+                                       <> <RefreshCw size={16} /> Re-Transcribe </>
+                                   )}
                                 </button>
                              </div>
                           </div>
@@ -1342,6 +1376,7 @@ export function App() {
                  </div>
              )}
 
+             {/* ... Sidebar Metadata ... */}
              {sidebarTab === 'metadata' && (
                  <div className="flex-1 overflow-y-auto p-5">
                     {/* ... (Existing metadata tab code) ... */}
@@ -1410,6 +1445,7 @@ export function App() {
                      
                      {/* 1. Left Controls */}
                      <div className="flex items-center gap-1 overflow-x-auto w-full md:w-auto scrollbar-hide pb-2 md:pb-0 mask-gradient pr-2 order-1">
+                        {/* ... existing controls ... */}
                         <button onClick={() => setIsVideoVisible(!isVideoVisible)} className={`p-2 rounded-lg transition shrink-0 ${isVideoVisible ? 'text-primary-600 bg-primary-50 dark:bg-primary-900/20' : 'text-neutral-400 hover:bg-neutral-100 dark:hover:bg-neutral-800'}`} title="Toggle Sidebar">
                            <LayoutGrid size={18} />
                         </button>

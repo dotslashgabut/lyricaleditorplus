@@ -35,7 +35,8 @@ export interface TranscriptionOptions {
 
 export const transcribeAudio = async (
   file: File, 
-  options: TranscriptionOptions
+  options: TranscriptionOptions,
+  signal?: AbortSignal
 ): Promise<Cue[]> => {
   // Check file size (20MB limit for inline data)
   if (file.size > 20 * 1024 * 1024) {
@@ -110,7 +111,7 @@ export const transcribeAudio = async (
   };
 
   try {
-    const response = await ai.models.generateContent({
+    const generateReq = ai.models.generateContent({
       model: modelName,
       contents: {
         parts: [
@@ -124,6 +125,19 @@ export const transcribeAudio = async (
         temperature: 0.3
       }
     });
+
+    let response;
+
+    if (signal) {
+        const abortPromise = new Promise<never>((_, reject) => {
+            const handleAbort = () => reject(new DOMException('Aborted', 'AbortError'));
+            if (signal.aborted) handleAbort();
+            else signal.addEventListener('abort', handleAbort);
+        });
+        response = await Promise.race([generateReq, abortPromise]);
+    } else {
+        response = await generateReq;
+    }
 
     if (response.text) {
       const rawCues = JSON.parse(response.text);
@@ -142,7 +156,10 @@ export const transcribeAudio = async (
       }));
     }
     return [];
-  } catch (error) {
+  } catch (error: any) {
+    if (error.name === 'AbortError' || (signal && signal.aborted)) {
+        throw new Error("Transcription cancelled by user.");
+    }
     console.error("Transcription failed", error);
     throw error;
   }

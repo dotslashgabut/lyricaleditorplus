@@ -1,7 +1,8 @@
 import React, { useRef, useEffect, useState } from 'react';
 import { Cue, Word } from '../types';
 import { msToSrt, msToLrc, msToVtt, msToMmSsMmm, timeToMs } from '../utils/timeUtils';
-import { AlignLeft, GripVertical, Mic, PlayCircle, Plus, Minus, Trash2, Bold, Italic, AlertCircle, CheckSquare, Square } from 'lucide-react';
+import { AlignLeft, GripVertical, Mic, PlayCircle, Plus, Minus, Trash2, Bold, Italic, AlertCircle, CheckSquare, Square, Volume2, Loader2 } from 'lucide-react';
+import { playTTS } from '../services/aiService';
 
 interface CueListProps {
   cues: Cue[];
@@ -263,6 +264,7 @@ const CueList: React.FC<CueListProps> = ({ cues, onChange, onEditWords, currentM
   const itemRefs = useRef<(HTMLDivElement | null)[]>([]);
   const [draggedIndex, setDraggedIndex] = useState<number | null>(null);
   const [overIndex, setOverIndex] = useState<number | null>(null);
+  const [playingTTSId, setPlayingTTSId] = useState<string | null>(null);
 
   // Calculate active index
   const activeIndex = cues.findIndex(c => currentMillis >= c.start && currentMillis < c.end);
@@ -317,6 +319,19 @@ const CueList: React.FC<CueListProps> = ({ cues, onChange, onEditWords, currentM
   const removeCue = (index: number) => {
     const newCues = cues.filter((_, i) => i !== index);
     onChange(newCues);
+  };
+
+  const handlePlayTTS = async (id: string, text: string) => {
+      if (playingTTSId) return; // Prevent concurrent plays
+      setPlayingTTSId(id);
+      try {
+          await playTTS(text);
+      } catch (e) {
+          console.error(e);
+          alert("TTS Failed");
+      } finally {
+          setPlayingTTSId(null);
+      }
   };
 
   // Drag Handlers
@@ -515,16 +530,13 @@ const CueList: React.FC<CueListProps> = ({ cues, onChange, onEditWords, currentM
                             const wordStart = word.start || 0;
                             const wordEnd = word.end || (wordStart + 300);
                             const isWordActive = currentMillis >= wordStart && currentMillis < wordEnd;
+                            const wordUniqueId = word.id || `w-${index}-${wIdx}`;
                             
                             // --- Overlap Detection (Words) ---
-                            // 1. Previous word end > Current word start (Overlap)
-                            // 2. Previous word start > Current word start (Out of order)
                             const prevWord = wIdx > 0 ? allWords[wIdx - 1] : null;
                             const isOverlap = prevWord && (wordStart < (prevWord.end || 0) - 1);
                             const isOutOfOrder = prevWord && (wordStart < (prevWord.start || 0));
                             const isInvalidDuration = wordStart > wordEnd;
-                            
-                            // New Check: Last word ends after line ends
                             const isLineEndIssue = (wIdx === allWords.length - 1) && (wordEnd > cue.end);
 
                             const hasIssue = isOverlap || isOutOfOrder || isInvalidDuration || isLineEndIssue;
@@ -534,15 +546,17 @@ const CueList: React.FC<CueListProps> = ({ cues, onChange, onEditWords, currentM
                             if (isInvalidDuration) issueTitle = "Invalid: End time is before start time";
                             if (isLineEndIssue) issueTitle = "Overflow: Word ends after line ends";
 
+                            const isSpeaking = playingTTSId === wordUniqueId;
+
                             return (
                               <div 
-                                key={word.id || wIdx} 
+                                key={wordUniqueId} 
                                 onClick={(e) => {
                                     e.stopPropagation();
                                     onSeek && onSeek(wordStart, true);
                                 }}
                                 title={issueTitle}
-                                className={`flex flex-col items-center p-2 rounded-lg border transition-all duration-200 cursor-pointer select-none relative
+                                className={`flex flex-col items-center p-2 rounded-lg border transition-all duration-200 cursor-pointer select-none relative pb-3
                                     ${isWordActive 
                                         ? 'bg-primary-100 dark:bg-primary-900/40 border-primary-500 scale-105 shadow-md z-10' 
                                         : hasIssue 
@@ -586,6 +600,15 @@ const CueList: React.FC<CueListProps> = ({ cues, onChange, onEditWords, currentM
                                     `}
                                     placeholder="word"
                                  />
+                                 
+                                 {/* TTS Button for Word */}
+                                 <button
+                                    onClick={(e) => { e.stopPropagation(); handlePlayTTS(wordUniqueId, word.text); }}
+                                    className="absolute -bottom-2.5 bg-white dark:bg-neutral-900 border border-neutral-200 dark:border-neutral-700 rounded-full p-1 text-neutral-400 hover:text-primary-600 shadow-sm z-20"
+                                    title="Speak Word"
+                                 >
+                                    {isSpeaking ? <Loader2 size={10} className="animate-spin text-primary-500" /> : <Volume2 size={10} />}
+                                 </button>
                               </div>
                             );
                           })}
@@ -628,6 +651,16 @@ const CueList: React.FC<CueListProps> = ({ cues, onChange, onEditWords, currentM
                             <span>Word Timing</span>
                             {/* Fix: Strictly check if words array exists and has items */}
                             {cue.words && Array.isArray(cue.words) && cue.words.length > 0 ? <span className="w-2 h-2 rounded-full bg-green-500 ml-1"></span> : null}
+                          </button>
+                          
+                          {/* TTS Button for Line */}
+                          <button 
+                            onClick={() => handlePlayTTS(cue.id, cue.text)}
+                            className="flex items-center gap-2 px-4 py-2.5 rounded-lg bg-neutral-100 dark:bg-neutral-800 text-neutral-600 dark:text-neutral-400 hover:bg-primary-50 dark:hover:bg-primary-900/20 hover:text-primary-600 transition text-sm font-medium"
+                            title="Speak Line (TTS)"
+                          >
+                            {playingTTSId === cue.id ? <Loader2 size={16} className="animate-spin text-primary-500" /> : <Volume2 size={16} />}
+                            <span className="hidden sm:inline">Speak</span>
                           </button>
 
                           <button 

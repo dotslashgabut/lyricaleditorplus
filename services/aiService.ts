@@ -1,6 +1,6 @@
 
 
-import { GoogleGenAI, Type } from "@google/genai";
+import { GoogleGenAI, Type, Modality } from "@google/genai";
 import { Cue, Word } from '../types';
 
 // Initialize Gemini API
@@ -64,12 +64,19 @@ export const transcribeAudio = async (
        Each cue represents a LINE of lyrics/speech.
        Crucially, for EACH line, include a "words" array containing every word with its specific start and end timestamp.
        ${timingInstructions}
-       Keep the text verbatim/raw (include fillers if present).`
+       TRANSCRIPTION RULES:
+       1. Keep the text verbatim/raw.
+       2. CRITICAL: Include ALL repetitions of words or phrases (e.g. "baby baby baby"). Do NOT clean up repetitions.
+       3. Maintain the originality of the source.
+       4. Include fillers if present.`
     : `Transcribe the audio accurately into lyrics/subtitles. 
        Return a JSON array of cues where each cue is a sentence or subtitle line.
        Each cue must have 'start' (ms), 'end' (ms), and 'text'.
        ${timingInstructions}
-       Keep the text verbatim/raw.`;
+       TRANSCRIPTION RULES:
+       1. Keep the text verbatim/raw.
+       2. CRITICAL: Include ALL repetitions of words or phrases (e.g. "no no no"). Do NOT clean up repetitions.
+       3. Maintain the originality of the source.`;
 
   // Define Schema
   const wordSchema = {
@@ -269,4 +276,89 @@ export const refineLyrics = async (
     console.error("Refinement failed", error);
     throw error;
   }
+};
+
+// --- TTS Features ---
+
+// Audio Decoding Helpers
+function decode(base64: string) {
+  const binaryString = atob(base64);
+  const len = binaryString.length;
+  const bytes = new Uint8Array(len);
+  for (let i = 0; i < len; i++) {
+    bytes[i] = binaryString.charCodeAt(i);
+  }
+  return bytes;
+}
+
+async function decodeAudioData(
+  data: Uint8Array,
+  ctx: AudioContext,
+  sampleRate: number,
+  numChannels: number,
+): Promise<AudioBuffer> {
+  const dataInt16 = new Int16Array(data.buffer);
+  const frameCount = dataInt16.length / numChannels;
+  const buffer = ctx.createBuffer(numChannels, frameCount, sampleRate);
+
+  for (let channel = 0; channel < numChannels; channel++) {
+    const channelData = buffer.getChannelData(channel);
+    for (let i = 0; i < frameCount; i++) {
+      channelData[i] = dataInt16[i * numChannels + channel] / 32768.0;
+    }
+  }
+  return buffer;
+}
+
+let ttsAudioContext: AudioContext | null = null;
+
+export const playTTS = async (text: string) => {
+    if (!text.trim()) return;
+
+    if (!ttsAudioContext) {
+        ttsAudioContext = new (window.AudioContext || (window as any).webkitAudioContext)({ sampleRate: 24000 });
+    }
+
+    // Ensure context is running (needed for some browsers if not initiated by user gesture recently)
+    if (ttsAudioContext.state === 'suspended') {
+      await ttsAudioContext.resume();
+    }
+
+    try {
+        const response = await ai.models.generateContent({
+            model: "gemini-2.5-flash-preview-tts",
+            contents: [{ parts: [{ text }] }],
+            config: {
+                responseModalities: [Modality.AUDIO],
+                speechConfig: {
+                    voiceConfig: {
+                        prebuiltVoiceConfig: { voiceName: 'Kore' },
+                    },
+                },
+            },
+        });
+
+        const base64Audio = response.candidates?.[0]?.content?.parts?.[0]?.inlineData?.data;
+        if (!base64Audio) throw new Error("No audio data returned from TTS");
+
+        const audioBuffer = await decodeAudioData(
+            decode(base64Audio),
+            ttsAudioContext,
+            24000,
+            1
+        );
+
+        const source = ttsAudioContext.createBufferSource();
+        source.buffer = audioBuffer;
+        source.connect(ttsAudioContext.destination);
+        source.start();
+        
+        return new Promise<void>((resolve) => {
+            source.onended = () => resolve();
+        });
+
+    } catch (error) {
+        console.error("TTS Error:", error);
+        throw error;
+    }
 };

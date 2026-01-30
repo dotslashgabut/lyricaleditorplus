@@ -66,17 +66,18 @@ export const transcribeAudio = async (
        ${timingInstructions}
        TRANSCRIPTION RULES:
        1. Keep the text verbatim/raw.
-       2. CRITICAL: Include ALL repetitions of words or phrases (e.g. "baby baby baby"). Do NOT clean up repetitions.
-       3. Maintain the originality of the source.
-       4. Include fillers if present.`
+       2. CRITICAL: Include ALL repetitions (e.g., "baby baby baby") AND all filler sounds/vocals (e.g., "um", "ah", "e e e", "ooh", "na na").
+       3. Do NOT clean up disfluencies, stutters, or repetitions.
+       4. Maintain the originality of the source audio exactly as heard.`
     : `Transcribe the audio accurately into lyrics/subtitles. 
        Return a JSON array of cues where each cue is a sentence or subtitle line.
        Each cue must have 'start' (ms), 'end' (ms), and 'text'.
        ${timingInstructions}
        TRANSCRIPTION RULES:
        1. Keep the text verbatim/raw.
-       2. CRITICAL: Include ALL repetitions of words or phrases (e.g. "no no no"). Do NOT clean up repetitions.
-       3. Maintain the originality of the source.`;
+       2. CRITICAL: Include ALL repetitions (e.g., "no no no") AND all filler sounds/vocals (e.g., "um", "ah", "e e e", "ooh", "na na").
+       3. Do NOT clean up disfluencies, stutters, or repetitions.
+       4. Maintain the originality of the source audio exactly as heard.`;
 
   // Define Schema
   const wordSchema = {

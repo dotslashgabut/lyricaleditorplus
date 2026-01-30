@@ -312,8 +312,26 @@ async function decodeAudioData(
 }
 
 let ttsAudioContext: AudioContext | null = null;
+let currentSource: AudioBufferSourceNode | null = null;
+let activeRequestId = 0;
+
+export const stopTTS = () => {
+    activeRequestId++; // Increment to invalidate any pending async operations
+    if (currentSource) {
+        try {
+            currentSource.stop();
+        } catch (e) {
+            // ignore if already stopped
+        }
+        currentSource = null;
+    }
+};
 
 export const playTTS = async (text: string) => {
+    stopTTS(); // Stop any existing playback/request
+    
+    const requestId = activeRequestId;
+
     if (!text.trim()) return;
 
     if (!ttsAudioContext) {
@@ -339,6 +357,8 @@ export const playTTS = async (text: string) => {
             },
         });
 
+        if (requestId !== activeRequestId) return; // Aborted during API call
+
         const base64Audio = response.candidates?.[0]?.content?.parts?.[0]?.inlineData?.data;
         if (!base64Audio) throw new Error("No audio data returned from TTS");
 
@@ -349,13 +369,19 @@ export const playTTS = async (text: string) => {
             1
         );
 
+        if (requestId !== activeRequestId) return; // Aborted during decoding
+
         const source = ttsAudioContext.createBufferSource();
         source.buffer = audioBuffer;
         source.connect(ttsAudioContext.destination);
+        currentSource = source;
         source.start();
         
         return new Promise<void>((resolve) => {
-            source.onended = () => resolve();
+            source.onended = () => {
+                if (currentSource === source) currentSource = null;
+                resolve();
+            };
         });
 
     } catch (error) {

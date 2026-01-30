@@ -1,3 +1,5 @@
+
+
 import React, { useState, useEffect, useRef } from 'react';
 import { FileData, SubtitleFormat, Cue, Word, Metadata } from './types';
 import { detectFormat, parseContent, stringifyContent } from './services/subtitleParser';
@@ -62,7 +64,9 @@ import {
   WrapText,
   Link,
   Scissors,
-  Zap
+  Zap,
+  History,
+  Repeat
 } from 'lucide-react';
 
 export function App() {
@@ -71,6 +75,7 @@ export function App() {
 
   // App State
   const [fileData, setFileData] = useState<FileData | null>(null);
+  const [lastActiveFileData, setLastActiveFileData] = useState<FileData | null>(null);
   const [cues, setCues] = useState<Cue[]>([]);
   const [viewMode, setViewMode] = useState<'line' | 'word'>('line');
   const [metadata, setMetadata] = useState<Metadata>({ title: '', artist: '', album: '', by: '' });
@@ -95,6 +100,19 @@ export function App() {
   const [isMuted, setIsMuted] = useState(false);
   const mediaRef = useRef<HTMLMediaElement>(null);
   const rafRef = useRef<number | null>(null);
+
+  // Looping State
+  const [isLooping, setIsLooping] = useState(false);
+  // We use a ref for loop logic to avoid stale closures in the requestAnimationFrame loop
+  const loopCtrlRef = useRef({
+    isLooping: false,
+    region: null as { start: number, end: number } | null
+  });
+
+  // Sync state to ref
+  useEffect(() => {
+    loopCtrlRef.current.isLooping = isLooping;
+  }, [isLooping]);
 
   const [dragging, setDragging] = useState(false);
   const [editingWordIndex, setEditingWordIndex] = useState<number | null>(null);
@@ -219,7 +237,20 @@ export function App() {
     if (rafRef.current) cancelAnimationFrame(rafRef.current);
     const loop = () => {
       if (mediaRef.current && !mediaRef.current.paused) {
-        setCurrentTime(mediaRef.current.currentTime * 1000);
+        const t = mediaRef.current.currentTime * 1000;
+        
+        // Loop Logic
+        if (loopCtrlRef.current.isLooping && loopCtrlRef.current.region) {
+           if (t >= loopCtrlRef.current.region.end) {
+              // Loop back to start
+              mediaRef.current.currentTime = loopCtrlRef.current.region.start / 1000;
+              // Don't update current time yet to avoid jitter in UI, allow browser to seek
+              rafRef.current = requestAnimationFrame(loop);
+              return;
+           }
+        }
+
+        setCurrentTime(t);
         rafRef.current = requestAnimationFrame(loop);
       }
     };
@@ -490,7 +521,14 @@ export function App() {
   };
 
   const handleHomeTranscribe = () => runTranscription(transcribeModel);
-  const handleSidebarTranscribe = () => runTranscription(sidebarTranscribeModel);
+  const handleSidebarTranscribe = () => {
+    if (cues.length > 0) {
+        if (!window.confirm("Re-transcribing will overwrite all current lyrics/subtitles. This action cannot be undone unless you have exported your work.\n\nDo you want to continue?")) {
+            return;
+        }
+    }
+    runTranscription(sidebarTranscribeModel);
+  };
 
   const handleExport = (format: SubtitleFormat) => {
     const content = stringifyContent(cues, format, metadata);
@@ -523,10 +561,18 @@ export function App() {
     }
   };
 
-  const handleSeek = (ms: number, shouldPlay: boolean = false) => {
+  const handleSeek = (ms: number, shouldPlay: boolean = false, endTime?: number) => {
     if (mediaRef.current) {
       mediaRef.current.currentTime = ms / 1000;
       setCurrentTime(ms);
+      
+      // Update loop region if end time is provided, otherwise clear it (assuming manual seek implies breaking loop)
+      // Note: We update the ref directly so it picks up immediately
+      if (endTime !== undefined) {
+          loopCtrlRef.current.region = { start: ms, end: endTime };
+      } else {
+          loopCtrlRef.current.region = null;
+      }
       
       if (shouldPlay) {
           if (mediaRef.current.paused) {
@@ -549,6 +595,8 @@ export function App() {
       if (mediaRef.current) {
           mediaRef.current.currentTime = ms / 1000;
       }
+      // Clear loop on manual seek
+      loopCtrlRef.current.region = null;
   };
 
   const handleCueChange = (updatedCues: Cue[]) => {
@@ -844,6 +892,33 @@ export function App() {
               </p>
           </div>
 
+          {/* RESUME BUTTON */}
+          {lastActiveFileData && (
+              <div className="mb-6 w-full animate-in slide-in-from-top-2 fade-in duration-300">
+                  <button 
+                      onClick={() => setFileData(lastActiveFileData)}
+                      className="w-full p-4 bg-white dark:bg-neutral-800 border border-neutral-200 dark:border-neutral-700 rounded-2xl shadow-lg hover:shadow-xl hover:border-primary-500 dark:hover:border-primary-500 transition-all group text-left flex items-center gap-4 relative overflow-hidden"
+                  >
+                      <div className="absolute left-0 top-0 bottom-0 w-1.5 bg-green-500"></div>
+                      <div className="p-2.5 bg-green-100 dark:bg-green-900/30 text-green-600 dark:text-green-400 rounded-full group-hover:scale-110 transition-transform">
+                          <History size={24} />
+                      </div>
+                      <div className="flex-1 min-w-0">
+                          <div className="text-[10px] font-bold text-neutral-400 uppercase tracking-wider mb-0.5">Resume Session</div>
+                          <div className="font-semibold text-neutral-900 dark:text-neutral-100 truncate text-base">{lastActiveFileData.name}</div>
+                          <div className="text-xs text-neutral-500 flex items-center gap-2 mt-0.5">
+                              <span>{cues.length} lines</span>
+                              <span>•</span>
+                              <span>{mediaName ? 'Media Loaded' : 'No Media'}</span>
+                          </div>
+                      </div>
+                       <div className="p-2 text-neutral-400 group-hover:text-primary-500 group-hover:translate-x-1 transition-all">
+                          <ChevronRight size={20} />
+                      </div>
+                  </button>
+              </div>
+          )}
+
           <div className="flex justify-center mb-5">
               <div className="bg-neutral-100 dark:bg-neutral-800 p-1 rounded-xl flex gap-1">
                   <button 
@@ -1014,7 +1089,10 @@ export function App() {
       <header className="flex-none h-16 border-b border-neutral-200 dark:border-neutral-800 flex items-center justify-between px-3 md:px-4 bg-white/80 dark:bg-neutral-950/80 backdrop-blur-md z-40">
         <div className="flex items-center gap-3 min-w-0 flex-1 mr-2">
            <button 
-             onClick={() => setFileData(null)} 
+             onClick={() => {
+                 setLastActiveFileData(fileData);
+                 setFileData(null);
+             }} 
              className="p-2 hover:bg-neutral-100 dark:hover:bg-neutral-800 rounded-lg text-neutral-500 transition shrink-0"
              title="Back to Home"
            >
@@ -1149,6 +1227,7 @@ export function App() {
              transition-all duration-300 ease-in-out bg-neutral-50 dark:bg-neutral-900 border-r border-neutral-200 dark:border-neutral-800 flex flex-col z-50
              ${isVideoVisible ? 'fixed inset-x-0 bottom-0 top-16 md:relative md:top-auto md:w-[400px] lg:w-[450px] md:inset-auto' : 'w-0 border-none overflow-hidden'}
          `}>
+             {/* ... Sidebar Content ... */}
              {/* Sidebar Tabs */}
              <div className="flex border-b border-neutral-200 dark:border-neutral-800 bg-white dark:bg-neutral-900 relative">
                 <button 
@@ -1453,7 +1532,7 @@ export function App() {
                 </div>
              )}
 
-             <div className={`flex-1 overflow-y-auto p-4 md:p-6 scroll-smooth ${mediaUrl ? 'pb-64' : 'pb-32'}`} id="cue-container">
+             <div className="flex-1 overflow-y-auto p-4 md:p-6 scroll-smooth" id="cue-container">
                 <div className="max-w-[95%] 2xl:max-w-[1800px] mx-auto">
                    <CueList 
                         cues={filteredCues} 
@@ -1461,11 +1540,13 @@ export function App() {
                         onEditWords={setEditingWordIndex} 
                         currentMillis={currentTime} 
                         onSeek={handleSeek} 
-                        viewMode={viewMode}
+                        viewMode={viewMode} 
                         selectedCueIds={selectedCueIds}
                         onToggleSelection={handleToggleSelection}
                         onInsert={insertCue}
                    />
+                   {/* Spacer for bottom elements (player/status bar) */}
+                   <div className={`w-full transition-all duration-300 ${mediaUrl ? 'h-96' : 'h-32'}`} />
                 </div>
              </div>
 
@@ -1473,12 +1554,22 @@ export function App() {
              {mediaUrl && (
                  <div className="absolute bottom-8 left-4 right-4 md:left-6 md:right-6 lg:left-8 lg:right-8 bg-white dark:bg-neutral-800/90 backdrop-blur-md border border-neutral-200 dark:border-neutral-700/50 rounded-2xl shadow-2xl p-3 z-50 animate-in slide-in-from-bottom-5">
                     <div className="flex items-center gap-4">
-                        <button 
-                            onClick={togglePlay}
-                            className="w-10 h-10 flex items-center justify-center bg-primary-600 hover:bg-primary-700 text-white rounded-full shadow-lg shadow-primary-500/30 transition-all active:scale-95 shrink-0"
-                        >
-                            {isPlaying ? <Pause size={20} fill="currentColor" /> : <Play size={20} fill="currentColor" className="ml-0.5" />}
-                        </button>
+                        <div className="flex items-center gap-2">
+                            <button 
+                                onClick={togglePlay}
+                                className="w-10 h-10 flex items-center justify-center bg-primary-600 hover:bg-primary-700 text-white rounded-full shadow-lg shadow-primary-500/30 transition-all active:scale-95 shrink-0"
+                            >
+                                {isPlaying ? <Pause size={20} fill="currentColor" /> : <Play size={20} fill="currentColor" className="ml-0.5" />}
+                            </button>
+                            {/* REPEAT BUTTON */}
+                            <button 
+                                onClick={() => setIsLooping(!isLooping)}
+                                className={`w-8 h-8 flex items-center justify-center rounded-lg transition-colors ${isLooping ? 'bg-primary-100 dark:bg-primary-900/40 text-primary-600 dark:text-primary-400' : 'text-neutral-400 hover:bg-neutral-100 dark:hover:bg-neutral-700'}`}
+                                title={isLooping ? "Loop Active: Repeating lines" : "Loop Inactive"}
+                            >
+                                <Repeat size={16} />
+                            </button>
+                        </div>
 
                         <div className="flex-1 flex flex-col justify-center">
                             <input 

@@ -1,15 +1,17 @@
+
+
 import React, { useRef, useEffect, useState } from 'react';
 import { Cue, Word } from '../types';
 import { msToSrt, msToLrc, msToVtt, msToMmSsMmm, timeToMs } from '../utils/timeUtils';
 import { AlignLeft, GripVertical, Mic, PlayCircle, Plus, Minus, Trash2, Bold, Italic, AlertCircle, CheckSquare, Square, Volume2, Loader2 } from 'lucide-react';
-import { playTTS } from '../services/aiService';
+import { playTTS, stopTTS } from '../services/aiService';
 
 interface CueListProps {
   cues: Cue[];
   onChange: (updatedCues: Cue[]) => void;
   onEditWords: (cueIndex: number) => void;
   currentMillis: number;
-  onSeek?: (ms: number, shouldPlay?: boolean) => void;
+  onSeek?: (ms: number, shouldPlay?: boolean, endTime?: number) => void;
   viewMode: 'line' | 'word';
   selectedCueIds: Set<string>;
   onToggleSelection: (id: string, shiftKey: boolean) => void;
@@ -322,15 +324,27 @@ const CueList: React.FC<CueListProps> = ({ cues, onChange, onEditWords, currentM
   };
 
   const handlePlayTTS = async (id: string, text: string) => {
-      if (playingTTSId) return; // Prevent concurrent plays
+      // If clicking the currently playing/loading item, stop it
+      if (playingTTSId === id) {
+          stopTTS();
+          setPlayingTTSId(null);
+          return;
+      }
+      
+      // Stop any other active playback first
+      if (playingTTSId) {
+          stopTTS();
+      }
+
       setPlayingTTSId(id);
       try {
           await playTTS(text);
+          // If execution finishes normally (audio ended), clear state
+          setPlayingTTSId((current) => current === id ? null : current);
       } catch (e) {
           console.error(e);
-          alert("TTS Failed");
-      } finally {
-          setPlayingTTSId(null);
+          // On error or manual abort, ensure state is cleared
+          setPlayingTTSId((current) => current === id ? null : current);
       }
   };
 
@@ -508,7 +522,7 @@ const CueList: React.FC<CueListProps> = ({ cues, onChange, onEditWords, currentM
                     
                     {onSeek && (
                        <button 
-                         onClick={() => onSeek(cue.start, true)} 
+                         onClick={() => onSeek(cue.start, true, cue.end)} 
                          className="mt-1 w-full flex items-center justify-center gap-2 py-2.5 rounded-lg bg-neutral-100 dark:bg-neutral-800 hover:bg-primary-100 dark:hover:bg-primary-900/40 text-neutral-600 dark:text-neutral-400 hover:text-primary-600 transition text-sm font-medium"
                          title="Play from this line"
                        >
@@ -553,7 +567,7 @@ const CueList: React.FC<CueListProps> = ({ cues, onChange, onEditWords, currentM
                                 key={wordUniqueId} 
                                 onClick={(e) => {
                                     e.stopPropagation();
-                                    onSeek && onSeek(wordStart, true);
+                                    onSeek && onSeek(wordStart, true, wordEnd);
                                 }}
                                 title={issueTitle}
                                 className={`flex flex-col items-center p-2 rounded-lg border transition-all duration-200 cursor-pointer select-none relative pb-3
@@ -605,9 +619,9 @@ const CueList: React.FC<CueListProps> = ({ cues, onChange, onEditWords, currentM
                                  <button
                                     onClick={(e) => { e.stopPropagation(); handlePlayTTS(wordUniqueId, word.text); }}
                                     className="absolute -bottom-2.5 bg-white dark:bg-neutral-900 border border-neutral-200 dark:border-neutral-700 rounded-full p-1 text-neutral-400 hover:text-primary-600 shadow-sm z-20"
-                                    title="Speak Word"
+                                    title={isSpeaking ? "Stop" : "Speak Word"}
                                  >
-                                    {isSpeaking ? <Loader2 size={10} className="animate-spin text-primary-500" /> : <Volume2 size={10} />}
+                                    {isSpeaking ? <Square size={10} fill="currentColor" className="text-primary-500" /> : <Volume2 size={10} />}
                                  </button>
                               </div>
                             );
@@ -657,10 +671,10 @@ const CueList: React.FC<CueListProps> = ({ cues, onChange, onEditWords, currentM
                           <button 
                             onClick={() => handlePlayTTS(cue.id, cue.text)}
                             className="flex items-center gap-2 px-4 py-2.5 rounded-lg bg-neutral-100 dark:bg-neutral-800 text-neutral-600 dark:text-neutral-400 hover:bg-primary-50 dark:hover:bg-primary-900/20 hover:text-primary-600 transition text-sm font-medium"
-                            title="Speak Line (TTS)"
+                            title={playingTTSId === cue.id ? "Stop TTS" : "Speak Line (TTS)"}
                           >
-                            {playingTTSId === cue.id ? <Loader2 size={16} className="animate-spin text-primary-500" /> : <Volume2 size={16} />}
-                            <span className="hidden sm:inline">Speak</span>
+                            {playingTTSId === cue.id ? <Square size={16} fill="currentColor" className="text-primary-500" /> : <Volume2 size={16} />}
+                            <span className="hidden sm:inline">{playingTTSId === cue.id ? "Stop" : "Speak"}</span>
                           </button>
 
                           <button 
@@ -680,6 +694,17 @@ const CueList: React.FC<CueListProps> = ({ cues, onChange, onEditWords, currentM
       })}
       {/* Final separator at the bottom */}
       <InsertSeparator onClick={() => onInsert(cues.length)} />
+
+      {/* Big Add Button at the end */}
+      <button 
+        onClick={() => onInsert(cues.length)}
+        className="w-full py-6 mt-4 border-2 border-dashed border-neutral-300 dark:border-neutral-800 rounded-2xl text-neutral-400 hover:text-primary-600 hover:border-primary-400 hover:bg-neutral-50 dark:hover:bg-neutral-900/50 transition flex flex-col items-center justify-center gap-2 group"
+      >
+        <div className="p-2 bg-neutral-100 dark:bg-neutral-800 rounded-full group-hover:bg-primary-100 dark:group-hover:bg-primary-900/30 transition">
+            <Plus size={24} />
+        </div>
+        <span className="font-medium">Add New Line</span>
+      </button>
     </div>
   );
 };

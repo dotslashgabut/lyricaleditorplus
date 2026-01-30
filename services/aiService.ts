@@ -365,7 +365,8 @@ export const playTTS = async (text: string) => {
             model: "gemini-2.5-flash-preview-tts",
             contents: [{ parts: [{ text }] }],
             config: {
-                responseModalities: [Modality.AUDIO],
+                // Use string cast for Modality to prevent potential Enum issues at runtime with some bundlers
+                responseModalities: ['AUDIO' as Modality], 
                 speechConfig: {
                     voiceConfig: {
                         prebuiltVoiceConfig: { voiceName: 'Kore' },
@@ -377,7 +378,19 @@ export const playTTS = async (text: string) => {
         if (requestId !== activeRequestId) return; // Aborted during API call
 
         const base64Audio = response.candidates?.[0]?.content?.parts?.[0]?.inlineData?.data;
-        if (!base64Audio) throw new Error("No audio data returned from TTS");
+        
+        if (!base64Audio) {
+            // Debugging checks
+            const textResponse = response.candidates?.[0]?.content?.parts?.[0]?.text;
+            if (textResponse) {
+                console.warn("TTS API returned text instead of audio:", textResponse);
+                throw new Error("TTS failed: The model returned text instead of audio. Please try again.");
+            }
+            if (response.candidates?.[0]?.finishReason) {
+                 throw new Error(`TTS generation stopped. Reason: ${response.candidates[0].finishReason}`);
+            }
+            throw new Error("No audio data returned from TTS. The response might be empty.");
+        }
 
         const audioBuffer = await decodeAudioData(
             decode(base64Audio),

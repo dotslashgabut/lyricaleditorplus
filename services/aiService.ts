@@ -5,7 +5,18 @@ import { Cue, Word } from '../types';
 
 // Initialize Gemini API
 // Using process.env.API_KEY as per instructions
-const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
+// Initialize Gemini API
+// Helper to get fresh client with current key
+export const getGenAIClient = () => {
+  const storedKey = localStorage.getItem('gemini_api_key');
+  const apiKey = storedKey || process.env.API_KEY;
+
+  if (!apiKey || apiKey === 'PLACEHOLDER_API_KEY') {
+    throw new Error("Gemini API Key is missing. Please add it in Settings.");
+  }
+
+  return new GoogleGenAI({ apiKey });
+};
 
 /**
  * Helper to convert file to base64 for Gemini
@@ -34,7 +45,7 @@ export interface TranscriptionOptions {
 }
 
 export const transcribeAudio = async (
-  file: File, 
+  file: File,
   options: TranscriptionOptions,
   signal?: AbortSignal
 ): Promise<Cue[]> => {
@@ -44,11 +55,11 @@ export const transcribeAudio = async (
   }
 
   const modelName = options.model || 'gemini-2.5-flash';
-  
+
   const audioPart = await fileToPart(file);
 
   const isWordsMode = options.mode === 'words';
-  
+
   const timingInstructions = `
     IMPORTANT TIMING RULES:
     1. Timestamps must be ABSOLUTE integers in MILLISECONDS from the very start of the file.
@@ -59,7 +70,7 @@ export const transcribeAudio = async (
        - 2 minutes = 120000 ms
   `;
 
-  const prompt = isWordsMode 
+  const prompt = isWordsMode
     ? `Transcribe the audio accurately into lyrics/subtitles. 
        Return a JSON array of cues. 
        Each cue represents a LINE of lyrics/speech.
@@ -111,7 +122,7 @@ export const transcribeAudio = async (
   };
 
   try {
-    const generateReq = ai.models.generateContent({
+    const generateReq = getGenAIClient().models.generateContent({
       model: modelName,
       contents: {
         parts: [
@@ -129,14 +140,14 @@ export const transcribeAudio = async (
     let response;
 
     if (signal) {
-        const abortPromise = new Promise<never>((_, reject) => {
-            const handleAbort = () => reject(new DOMException('Aborted', 'AbortError'));
-            if (signal.aborted) handleAbort();
-            else signal.addEventListener('abort', handleAbort);
-        });
-        response = await Promise.race([generateReq, abortPromise]);
+      const abortPromise = new Promise<never>((_, reject) => {
+        const handleAbort = () => reject(new DOMException('Aborted', 'AbortError'));
+        if (signal.aborted) handleAbort();
+        else signal.addEventListener('abort', handleAbort);
+      });
+      response = await Promise.race([generateReq, abortPromise]);
     } else {
-        response = await generateReq;
+      response = await generateReq;
     }
 
     if (response.text) {
@@ -158,7 +169,7 @@ export const transcribeAudio = async (
     return [];
   } catch (error: any) {
     if (error.name === 'AbortError' || (signal && signal.aborted)) {
-        throw new Error("Transcription cancelled by user.");
+      throw new Error("Transcription cancelled by user.");
     }
     console.error("Transcription failed", error);
     throw error;
@@ -166,7 +177,7 @@ export const transcribeAudio = async (
 };
 
 export const generateLyrics = async (
-  topic: string, 
+  topic: string,
   model: string = 'gemini-2.5-flash'
 ): Promise<Cue[]> => {
   const prompt = `Generate song lyrics about: "${topic}". 
@@ -175,7 +186,7 @@ export const generateLyrics = async (
   Do not include [Verse], [Chorus] tags, just the lyrics lines.`;
 
   try {
-    const response = await ai.models.generateContent({
+    const response = await getGenAIClient().models.generateContent({
       model: model,
       contents: prompt,
       config: {
@@ -195,25 +206,25 @@ export const generateLyrics = async (
     let cueIndex = 0;
 
     lines.forEach((line) => {
-        const cleanLine = line.trim();
-        
-        if (!cleanLine) {
-            // Found a blank line/stanza break.
-            // Advance time to create a gap, but don't add a cue.
-            currentTime += STANZA_GAP;
-            return;
-        }
+      const cleanLine = line.trim();
 
-        // Add Cue
-        cues.push({
-            id: `gen-${cueIndex++}`,
-            start: currentTime,
-            end: currentTime + LINE_DURATION,
-            text: cleanLine
-        });
+      if (!cleanLine) {
+        // Found a blank line/stanza break.
+        // Advance time to create a gap, but don't add a cue.
+        currentTime += STANZA_GAP;
+        return;
+      }
 
-        // Advance time for next line
-        currentTime += LINE_DURATION;
+      // Add Cue
+      cues.push({
+        id: `gen-${cueIndex++}`,
+        start: currentTime,
+        end: currentTime + LINE_DURATION,
+        text: cleanLine
+      });
+
+      // Advance time for next line
+      currentTime += LINE_DURATION;
     });
 
     return cues;
@@ -224,12 +235,12 @@ export const generateLyrics = async (
 };
 
 export const refineLyrics = async (
-  cues: Cue[], 
-  instruction: string, 
+  cues: Cue[],
+  instruction: string,
   model: string = 'gemini-2.5-flash'
 ): Promise<Cue[]> => {
   const simplifiedCues = cues.map(c => ({ id: c.id, text: c.text }));
-  
+
   const prompt = `Refine the following lyrics based on this instruction: "${instruction}".
   
   Input Lyrics JSON:
@@ -252,7 +263,7 @@ export const refineLyrics = async (
   };
 
   try {
-    const response = await ai.models.generateContent({
+    const response = await getGenAIClient().models.generateContent({
       model: model,
       contents: prompt,
       config: {
@@ -263,7 +274,7 @@ export const refineLyrics = async (
 
     if (response.text) {
       const refinedData = JSON.parse(response.text);
-      
+
       const idMap = new Map(cues.map(c => [c.id, c]));
       const newCues: Cue[] = [];
       let lastEnd = 0;
@@ -274,7 +285,7 @@ export const refineLyrics = async (
           newCues.push({
             ...original,
             text: item.text,
-            words: item.text !== original.text ? undefined : original.words 
+            words: item.text !== original.text ? undefined : original.words
           });
           lastEnd = original.end;
         } else {
@@ -296,54 +307,212 @@ export const refineLyrics = async (
   }
 };
 
-// --- TTS Features (Google Translate Source) ---
+// --- TTS Features (Hybrid: Google Translate + Web Speech API) ---
 
 let currentAudio: HTMLAudioElement | null = null;
 
-export const stopTTS = () => {
-    if (currentAudio) {
-        try {
-            currentAudio.pause();
-            currentAudio.currentTime = 0;
-        } catch (e) {
-            // ignore if already stopped or error
-        }
-        currentAudio = null;
-    }
+// Basic language detection
+// Comprehensive list of Google Translate supported languages
+export const TTS_LANGUAGES = [
+  { code: 'auto', name: 'Auto Detect' },
+  { code: 'af', name: 'Afrikaans' },
+  { code: 'sq', name: 'Albanian' },
+  { code: 'ar', name: 'Arabic' },
+  { code: 'hy', name: 'Armenian' },
+  { code: 'bn', name: 'Bengali' },
+  { code: 'bs', name: 'Bosnian' },
+  { code: 'ca', name: 'Catalan' },
+  { code: 'hr', name: 'Croatian' },
+  { code: 'cs', name: 'Czech' },
+  { code: 'da', name: 'Danish' },
+  { code: 'nl', name: 'Dutch' },
+  { code: 'en-US', name: 'English (US)' },
+  { code: 'en-GB', name: 'English (UK)' },
+  { code: 'en-AU', name: 'English (Australia)' },
+  { code: 'eo', name: 'Esperanto' },
+  { code: 'et', name: 'Estonian' },
+  { code: 'tl', name: 'Filipino' },
+  { code: 'fi', name: 'Finnish' },
+  { code: 'fr-FR', name: 'French' },
+  { code: 'de-DE', name: 'German' },
+  { code: 'el', name: 'Greek' },
+  { code: 'gu', name: 'Gujarati' },
+  { code: 'hi', name: 'Hindi' },
+  { code: 'hu', name: 'Hungarian' },
+  { code: 'is', name: 'Icelandic' },
+  { code: 'id', name: 'Indonesian' },
+  { code: 'it-IT', name: 'Italian' },
+  { code: 'ja', name: 'Japanese' },
+  { code: 'jw', name: 'Javanese' },
+  { code: 'kn', name: 'Kannada' },
+  { code: 'km', name: 'Khmer' },
+  { code: 'ko', name: 'Korean' },
+  { code: 'la', name: 'Latin' },
+  { code: 'lv', name: 'Latvian' },
+  { code: 'mk', name: 'Macedonian' },
+  { code: 'ml', name: 'Malayalam' },
+  { code: 'mr', name: 'Marathi' },
+  { code: 'my', name: 'Myanmar (Burmese)' },
+  { code: 'ne', name: 'Nepali' },
+  { code: 'no', name: 'Norwegian' },
+  { code: 'pl', name: 'Polish' },
+  { code: 'pt-BR', name: 'Portuguese (Brazil)' },
+  { code: 'pt-PT', name: 'Portuguese (Portugal)' },
+  { code: 'ro', name: 'Romanian' },
+  { code: 'ru', name: 'Russian' },
+  { code: 'sr', name: 'Serbian' },
+  { code: 'si', name: 'Sinhala' },
+  { code: 'sk', name: 'Slovak' },
+  { code: 'es-ES', name: 'Spanish (Spain)' },
+  { code: 'es-US', name: 'Spanish (US)' },
+  { code: 'su', name: 'Sundanese' },
+  { code: 'sw', name: 'Swahili' },
+  { code: 'sv', name: 'Swedish' },
+  { code: 'ta', name: 'Tamil' },
+  { code: 'te', name: 'Telugu' },
+  { code: 'th', name: 'Thai' },
+  { code: 'tr', name: 'Turkish' },
+  { code: 'uk', name: 'Ukrainian' },
+  { code: 'ur', name: 'Urdu' },
+  { code: 'vi', name: 'Vietnamese' },
+  { code: 'cy', name: 'Welsh' }
+];
+
+// Simplified language detection (trusts Browser or assumes English)
+const detectLanguage = (text: string): string => {
+  // If the user hasn't selected a language, we mostly rely on the browser's default
+  // or default to English. The specific character detection has been removed
+  // in favor of manual selection from the comprehensive list.
+  if (typeof navigator !== 'undefined') {
+    return navigator.language;
+  }
+  return 'en-US';
 };
 
-export const playTTS = async (text: string) => {
-    stopTTS(); // Stop any existing playback
-    
-    const textToSpeak = text.trim();
-    if (!textToSpeak) return;
+export const stopTTS = () => {
+  // Stop Google TTS (Audio Element)
+  if (currentAudio) {
+    try {
+      currentAudio.pause();
+      currentAudio.currentTime = 0;
+    } catch (e) {
+      // ignore
+    }
+    currentAudio = null;
+  }
 
-    // Use Google Translate's unofficial TTS API
-    // client=tw-ob is key to access it freely
-    // tl=en defaults to English. You could make this dynamic based on detected text language if needed.
-    const encodedText = encodeURIComponent(textToSpeak);
-    const url = `https://translate.google.com/translate_tts?ie=UTF-8&q=${encodedText}&tl=en&client=tw-ob`;
+  // Stop Web Speech API
+  if (typeof window !== 'undefined' && 'speechSynthesis' in window) {
+    window.speechSynthesis.cancel();
+  }
+};
 
-    return new Promise<void>((resolve, reject) => {
-        const audio = new Audio(url);
-        currentAudio = audio;
+export const playTTS = async (text: string, forcedLanguage: string = 'auto') => {
+  stopTTS(); // Stop any existing playback
 
-        audio.onended = () => {
-            if (currentAudio === audio) {
-                currentAudio = null;
-            }
-            resolve();
-        };
+  const textToSpeak = text.trim();
+  if (!textToSpeak) return;
 
-        audio.onerror = (e) => {
-            console.error("TTS Playback Error", e);
-            reject(new Error("Failed to play audio from Google Translate."));
-        };
+  let targetLang = forcedLanguage;
+  let specificVoiceName: string | undefined;
 
-        // Attempt to play
-        audio.play().catch(e => {
-            // User interaction policy might block auto-play if not triggered by click
-            reject(e);
-        });
-    });
+  // Check if forcedLanguage contains a specific voice name (format: "lang|Voice Name")
+  if (targetLang && targetLang.includes('|')) {
+    const parts = targetLang.split('|');
+    targetLang = parts[0];
+    specificVoiceName = parts[1];
+  }
+
+  // Resolve language for Google TTS (needs specific code)
+  // If targetLang is 'auto', we try browser detection or default to US English
+  const resolvedLang = (targetLang === 'auto' || !targetLang) ? detectLanguage(textToSpeak) : targetLang;
+
+  console.log(`TTS: Playing text. Lang: '${targetLang}' (Resolved: ${resolvedLang}), Voice: ${specificVoiceName || 'Default'}`);
+
+  // Strategy 1: Attempt Google TTS (only if we have a resolved language and no specific voice forced)
+  if (!specificVoiceName && resolvedLang && resolvedLang !== 'auto') {
+    try {
+      await playGoogleTTS(textToSpeak, resolvedLang);
+      return;
+    } catch (e) {
+      console.warn("Google TTS failed/unsupported, falling back to Web Speech API.", e);
+      // Fallthrough to Web Speech
+    }
+  }
+
+  // Strategy 2: Web Speech API
+  // We pass the original targetLang (which might be 'auto') to let Web Speech decide if it wants to use default
+  await playWebSpeech(textToSpeak, targetLang, specificVoiceName);
+};
+
+
+
+const playGoogleTTS = (text: string, lang: string): Promise<void> => {
+  return new Promise((resolve, reject) => {
+    const encodedText = encodeURIComponent(text);
+    // client=tw-ob is the key for the unofficial API
+    const url = `https://translate.google.com/translate_tts?ie=UTF-8&q=${encodedText}&tl=${lang}&client=tw-ob`;
+    const audio = new Audio(url);
+    currentAudio = audio;
+
+    audio.onended = () => {
+      if (currentAudio === audio) currentAudio = null;
+      resolve();
+    };
+    audio.onerror = (e) => {
+      reject(new Error("Google TTS Audio Error"));
+    };
+    audio.play().catch(reject);
+  });
+};
+
+const playWebSpeech = (text: string, lang: string, voiceName?: string): Promise<void> => {
+  if (typeof window === 'undefined' || !('speechSynthesis' in window)) {
+    throw new Error("Text-to-Speech is not supported in this browser.");
+  }
+
+  return new Promise<void>((resolve, reject) => {
+    const utterance = new SpeechSynthesisUtterance(text);
+
+    // Only set language if it's not 'auto', otherwise let browser default take over
+    if (lang && lang !== 'auto') {
+      utterance.lang = lang;
+    }
+
+    utterance.rate = 1.0;
+
+    // Voice Selection
+    const voices = window.speechSynthesis.getVoices();
+    let matchingVoice: SpeechSynthesisVoice | undefined;
+
+    // 1. Specific Voice Name (Highest Priority)
+    if (voiceName) {
+      matchingVoice = voices.find(v => v.name === voiceName);
+    }
+
+    // 2. Language Match (only if specific voice not found AND lang is not auto)
+    if (!matchingVoice && lang && lang !== 'auto') {
+      // Exact match
+      matchingVoice = voices.find(v => v.lang === lang);
+      // Base match
+      if (!matchingVoice) {
+        matchingVoice = voices.find(v => v.lang.startsWith(lang.split('-')[0]));
+      }
+    }
+
+    if (matchingVoice) {
+      utterance.voice = matchingVoice;
+    }
+
+    utterance.onend = () => resolve();
+    utterance.onerror = (e) => {
+      if (e.error === 'interrupted' || e.error === 'canceled') {
+        resolve();
+      } else {
+        reject(new Error(`TTS Error: ${e.error}`));
+      }
+    };
+
+    window.speechSynthesis.speak(utterance);
+  });
 };

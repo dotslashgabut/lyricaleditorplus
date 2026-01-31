@@ -296,136 +296,54 @@ export const refineLyrics = async (
   }
 };
 
-// --- TTS Features ---
+// --- TTS Features (Google Translate Source) ---
 
-// Audio Decoding Helpers
-function decode(base64: string) {
-  const binaryString = atob(base64);
-  const len = binaryString.length;
-  const bytes = new Uint8Array(len);
-  for (let i = 0; i < len; i++) {
-    bytes[i] = binaryString.charCodeAt(i);
-  }
-  return bytes;
-}
-
-async function decodeAudioData(
-  data: Uint8Array,
-  ctx: AudioContext,
-  sampleRate: number,
-  numChannels: number,
-): Promise<AudioBuffer> {
-  const dataInt16 = new Int16Array(data.buffer);
-  const frameCount = dataInt16.length / numChannels;
-  const buffer = ctx.createBuffer(numChannels, frameCount, sampleRate);
-
-  for (let channel = 0; channel < numChannels; channel++) {
-    const channelData = buffer.getChannelData(channel);
-    for (let i = 0; i < frameCount; i++) {
-      channelData[i] = dataInt16[i * numChannels + channel] / 32768.0;
-    }
-  }
-  return buffer;
-}
-
-let ttsAudioContext: AudioContext | null = null;
-let currentSource: AudioBufferSourceNode | null = null;
-let activeRequestId = 0;
+let currentAudio: HTMLAudioElement | null = null;
 
 export const stopTTS = () => {
-    activeRequestId++; // Increment to invalidate any pending async operations
-    if (currentSource) {
+    if (currentAudio) {
         try {
-            currentSource.stop();
+            currentAudio.pause();
+            currentAudio.currentTime = 0;
         } catch (e) {
-            // ignore if already stopped
+            // ignore if already stopped or error
         }
-        currentSource = null;
+        currentAudio = null;
     }
 };
 
 export const playTTS = async (text: string) => {
-    stopTTS(); // Stop any existing playback/request
+    stopTTS(); // Stop any existing playback
     
-    const requestId = activeRequestId;
-
-    let textToSpeak = text.trim();
+    const textToSpeak = text.trim();
     if (!textToSpeak) return;
 
-    if (!ttsAudioContext) {
-        ttsAudioContext = new (window.AudioContext || (window as any).webkitAudioContext)({ sampleRate: 24000 });
-    }
+    // Use Google Translate's unofficial TTS API
+    // client=tw-ob is key to access it freely
+    // tl=en defaults to English. You could make this dynamic based on detected text language if needed.
+    const encodedText = encodeURIComponent(textToSpeak);
+    const url = `https://translate.google.com/translate_tts?ie=UTF-8&q=${encodedText}&tl=en&client=tw-ob`;
 
-    // Ensure context is running (needed for some browsers if not initiated by user gesture recently)
-    if (ttsAudioContext.state === 'suspended') {
-      await ttsAudioContext.resume();
-    }
+    return new Promise<void>((resolve, reject) => {
+        const audio = new Audio(url);
+        currentAudio = audio;
 
-    // WORKAROUND: For very short text (likely single words), appending punctuation 
-    // helps the model recognize it as a distinct utterance to pronounce.
-    // Otherwise, it might treat it as a fragment or silence and return no audio.
-    if (textToSpeak.length < 5 && !/[.?!,;:]$/.test(textToSpeak)) {
-        textToSpeak += ".";
-    }
-
-    try {
-        const response = await ai.models.generateContent({
-            model: "gemini-2.5-flash-preview-tts",
-            contents: [{ parts: [{ text: textToSpeak }] }],
-            config: {
-                // Use string cast for Modality to prevent potential Enum issues at runtime with some bundlers
-                responseModalities: ['AUDIO' as Modality], 
-                speechConfig: {
-                    voiceConfig: {
-                        prebuiltVoiceConfig: { voiceName: 'Kore' },
-                    },
-                },
-            },
-        });
-
-        if (requestId !== activeRequestId) return; // Aborted during API call
-
-        const base64Audio = response.candidates?.[0]?.content?.parts?.[0]?.inlineData?.data;
-        
-        if (!base64Audio) {
-            // Debugging checks
-            const textResponse = response.candidates?.[0]?.content?.parts?.[0]?.text;
-            if (textResponse) {
-                console.warn("TTS API returned text instead of audio:", textResponse);
-                throw new Error("TTS failed: The model returned text instead of audio. Please try again.");
+        audio.onended = () => {
+            if (currentAudio === audio) {
+                currentAudio = null;
             }
-            if (response.candidates?.[0]?.finishReason) {
-                 // Check safety ratings or other reasons if available in full log
-                 console.warn("TTS Finish Reason:", response.candidates[0].finishReason);
-                 throw new Error(`TTS generation stopped. Reason: ${response.candidates[0].finishReason}`);
-            }
-            throw new Error("No audio data returned from TTS. The word might be too short or filtered.");
-        }
+            resolve();
+        };
 
-        const audioBuffer = await decodeAudioData(
-            decode(base64Audio),
-            ttsAudioContext,
-            24000,
-            1
-        );
+        audio.onerror = (e) => {
+            console.error("TTS Playback Error", e);
+            reject(new Error("Failed to play audio from Google Translate."));
+        };
 
-        if (requestId !== activeRequestId) return; // Aborted during decoding
-
-        const source = ttsAudioContext.createBufferSource();
-        source.buffer = audioBuffer;
-        source.connect(ttsAudioContext.destination);
-        currentSource = source;
-        source.start();
-        
-        return new Promise<void>((resolve) => {
-            source.onended = () => {
-                if (currentSource === source) currentSource = null;
-                resolve();
-            };
+        // Attempt to play
+        audio.play().catch(e => {
+            // User interaction policy might block auto-play if not triggered by click
+            reject(e);
         });
-
-    } catch (error) {
-        console.error("TTS Error:", error);
-        throw error;
-    }
+    });
 };

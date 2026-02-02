@@ -1,5 +1,3 @@
-
-
 import React, { useState, useEffect, useRef } from 'react';
 import { FileData, SubtitleFormat, Cue, Word, Metadata } from './types';
 import { detectFormat, parseContent, stringifyContent } from './services/subtitleParser';

@@ -149,6 +149,7 @@ export function App() {
   const [transcribeModel, setTranscribeModel] = useState('gemini-2.5-flash');
   const [sidebarTranscribeModel, setSidebarTranscribeModel] = useState('gemini-2.5-flash'); // Separate state for sidebar
   const [transcribeMode, setTranscribeMode] = useState<'lines' | 'words'>('lines');
+  const [sidebarTranscribeMode, setSidebarTranscribeMode] = useState<'lines' | 'words'>('lines'); // Separate state for sidebar
   const [isTranscribing, setIsTranscribing] = useState(false);
   const transcriptionAbortCtrl = useRef<AbortController | null>(null);
 
@@ -502,7 +503,7 @@ export function App() {
   };
 
   // Re-usable transcribe function
-  const runTranscription = async (model: string) => {
+  const runTranscription = async (model: string, mode: 'lines' | 'words') => {
       if (!mediaFile) return;
       
       // Stop any existing
@@ -517,7 +518,7 @@ export function App() {
       try {
           const cues = await transcribeAudio(mediaFile, {
              model: model,
-             mode: transcribeMode
+             mode: mode
           }, controller.signal);
           
           if (cues.length === 0) {
@@ -529,7 +530,7 @@ export function App() {
             if (!fileData) {
                 setFileData({
                     name: 'Transcribed Lyrics',
-                    format: transcribeMode === 'words' ? SubtitleFormat.LRC_ENHANCED : SubtitleFormat.LRC,
+                    format: mode === 'words' ? SubtitleFormat.LRC_ENHANCED : SubtitleFormat.LRC,
                     content: ''
                 });
                 setMetadata({ title: '', artist: '', album: '', by: '' });
@@ -538,7 +539,7 @@ export function App() {
             setCues(cues);
             setHistory([cues]);
             setHistoryIndex(0);
-            if (transcribeMode === 'words') {
+            if (mode === 'words') {
                 setViewMode('word');
             }
           }
@@ -558,14 +559,14 @@ export function App() {
       }
   };
 
-  const handleHomeTranscribe = () => runTranscription(transcribeModel);
+  const handleHomeTranscribe = () => runTranscription(transcribeModel, transcribeMode);
   const handleSidebarTranscribe = () => {
     if (cues.length > 0) {
         if (!window.confirm("Re-transcribing will overwrite all current lyrics/subtitles. This action cannot be undone unless you have exported your work.\n\nDo you want to continue?")) {
             return;
         }
     }
-    runTranscription(sidebarTranscribeModel);
+    runTranscription(sidebarTranscribeModel, sidebarTranscribeMode);
   };
 
   const handleExport = (format: SubtitleFormat) => {
@@ -1358,6 +1359,17 @@ export function App() {
                                       <option value="gemini-3-flash-preview">Gemini 3.0 Flash</option>
                                    </select>
                                 </div>
+                                <div>
+                                   <label className="block text-xs font-medium text-neutral-500 mb-1.5 ml-1">Mode</label>
+                                   <select 
+                                      value={sidebarTranscribeMode}
+                                      onChange={(e) => setSidebarTranscribeMode(e.target.value as any)}
+                                      className="w-full bg-neutral-50 dark:bg-neutral-900 border border-neutral-200 dark:border-neutral-700 rounded-xl px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-primary-500/20"
+                                   >
+                                      <option value="lines">Lines</option>
+                                      <option value="words">Words</option>
+                                   </select>
+                                </div>
                                 <button 
                                    onClick={isTranscribing ? stopTranscription : handleSidebarTranscribe}
                                    className={`w-full flex items-center justify-center gap-2 px-4 py-2.5 rounded-xl text-sm font-bold transition ${isTranscribing ? 'bg-red-500 hover:bg-red-600 text-white' : 'bg-neutral-900 dark:bg-white text-white dark:text-neutral-900 hover:opacity-90'}`}
@@ -1702,3 +1714,4 @@ export function App() {
     </div>
   );
 }
+

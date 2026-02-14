@@ -1,5 +1,3 @@
-
-
 import { GoogleGenAI, Type, Modality } from "@google/genai";
 import { Cue, Word } from '../types';
 
@@ -59,26 +57,30 @@ export const transcribeAudio = async (
        - 2 minutes = 120000 ms
   `;
 
+  const commonRules = `
+    TRANSCRIPTION RULES:
+    1. Transcribe EXACTLY what is spoken/sung. Verbatim.
+    2. REPETITION HANDLING: 
+       - If a word is repeated in the audio (e.g., "baby, baby, baby"), you MUST transcribe all instances.
+       - However, DO NOT hallucinate repetitions. If a word is spoken once, write it ONCE.
+       - STRICTLY AVOID infinite loops or stuttering text that is not in the audio.
+    3. TIMING ACCURACY: 
+       - Timestamps must align perfectly with the spoken word.
+       - Do not generate text for silent or instrumental sections.
+    4. FILLERS: Exclude hesitation sounds (um, ah) unless they are part of the lyrics/style.
+  `;
+
   const prompt = isWordsMode 
-    ? `Transcribe the audio accurately into lyrics/subtitles. 
-       Return a JSON array of cues. 
-       Each cue represents a LINE of lyrics/speech.
-       Crucially, for EACH line, include a "words" array containing every word with its specific start and end timestamp.
+    ? `Transcribe the audio into a JSON array of cues for lyrics/subtitles.
+       Each cue represents a LINE.
+       CRITICAL: For EACH line, include a "words" array.
+       Each item in "words" must have "text", "start" (ms), and "end" (ms).
        ${timingInstructions}
-       TRANSCRIPTION RULES:
-       1. Keep the text verbatim/raw.
-       2. CRITICAL: Include ALL repetitions (e.g., "baby baby baby") AND all filler sounds/vocals (e.g., "um", "ah", "e e e", "ooh", "na na").
-       3. Do NOT clean up disfluencies, stutters, or repetitions.
-       4. Maintain the originality of the source audio exactly as heard.`
-    : `Transcribe the audio accurately into lyrics/subtitles. 
-       Return a JSON array of cues where each cue is a sentence or subtitle line.
-       Each cue must have 'start' (ms), 'end' (ms), and 'text'.
+       ${commonRules}`
+    : `Transcribe the audio into a JSON array of cues for lyrics/subtitles.
+       Each cue is a sentence/line with "text", "start" (ms), and "end" (ms).
        ${timingInstructions}
-       TRANSCRIPTION RULES:
-       1. Keep the text verbatim/raw.
-       2. CRITICAL: Include ALL repetitions (e.g., "no no no") AND all filler sounds/vocals (e.g., "um", "ah", "e e e", "ooh", "na na").
-       3. Do NOT clean up disfluencies, stutters, or repetitions.
-       4. Maintain the originality of the source audio exactly as heard.`;
+       ${commonRules}`;
 
   // Define Schema
   const wordSchema = {
@@ -122,7 +124,8 @@ export const transcribeAudio = async (
       config: {
         responseMimeType: "application/json",
         responseSchema: responseSchema,
-        temperature: 0.3
+        temperature: 0.0, // Minimal creativity to strict adherence
+        topP: 0.8, // Slightly reduced topP to cut off low-probability loop tokens
       }
     });
 

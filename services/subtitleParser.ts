@@ -42,7 +42,7 @@ const decodeEntities = (str: string) => {
 const parseLRC = (content: string): ParseResult => {
   const lines = content.split(/\r?\n/);
   const cues: Cue[] = [];
-  const regex = /\[(\d{2}:\d{2}(?:\.\d{2,3})?)\](.*)/;
+  const regex = /\[(\d{1,3}:\d{2}(?:\.\d{2,3})?)\](.*)/;
   // Improved regex: Allow optional hours (H:MM:SS), and handle various bracket styles if needed
   // This matches <00:00.00> or <00:00:00.000>
   const wordRegex = /<(\d{1,2}:\d{2}(?::\d{2})?(?:\.\d{1,3})?)>([^<]*)/g;
@@ -329,10 +329,22 @@ const parseJSON = (content: string): ParseResult => {
         const cuesRaw = Array.isArray(parsed) ? parsed : (parsed.cues || []);
         const metadata = (!Array.isArray(parsed) && parsed.metadata) ? parsed.metadata : { title: '', artist: '', album: '', by: '' };
         
-        // Sanitize: ensure start/end are numbers and words are processed
+        const parseValue = (val: any) => {
+             if (typeof val === 'number') return val;
+             if (typeof val === 'string') {
+                 const trimmed = val.trim();
+                 // If purely digits, assume it is milliseconds already stringified
+                 if (/^\d+$/.test(trimmed)) {
+                     return parseInt(trimmed, 10);
+                 }
+                 return timeToMs(trimmed);
+             }
+             return 0;
+        };
+
         const cues = cuesRaw.map((c: any, i: number) => {
-            const start = typeof c.start === 'number' ? c.start : timeToMs(String(c.start || '0'));
-            const end = typeof c.end === 'number' ? c.end : timeToMs(String(c.end || '0'));
+            const start = parseValue(c.start);
+            const end = parseValue(c.end);
             const text = decodeEntities(c.text || '');
             
             let words: Word[] | undefined = undefined;
@@ -340,9 +352,8 @@ const parseJSON = (content: string): ParseResult => {
                 words = c.words.map((w: any, wi: number) => ({
                     id: w.id || `json-w-${i}-${wi}`,
                     text: decodeEntities(w.text || ''),
-                    // Ensure word timestamps are also numbers
-                    start: typeof w.start === 'number' ? w.start : timeToMs(String(w.start || '0')),
-                    end: typeof w.end === 'number' ? w.end : (w.end ? timeToMs(String(w.end)) : undefined)
+                    start: parseValue(w.start),
+                    end: w.end ? parseValue(w.end) : undefined
                 }));
             }
 
@@ -412,7 +423,6 @@ const escapeXML = (str: string) => {
   return str.replace(/&/g, '&amp;')
             .replace(/</g, '&lt;')
             .replace(/>/g, '&gt;');
-            // Quotes (' and ") do not need to be escaped in XML text content.
 };
 
 const stringifyTTML = (cues: Cue[], karaoke: boolean = false, metadata?: Metadata): string => {
@@ -437,12 +447,10 @@ ${metaItems}    </metadata>
     let content = escapeXML(cue.text).replace(/\n/g, '<br/>');
     
     if (karaoke && cue.words && cue.words.length > 0) {
-       // TTML Logic: Use absolute timestamps for spans, matching the paragraph context.
        const spans = cue.words.map((w, i, arr) => {
          const wordStart = w.start || cue.start;
          let wordEnd = w.end || (wordStart + 300);
          
-         // Fix overlap for export: Clamp end time to next word's start if overlapping
          if (i < arr.length - 1) {
              const nextWord = arr[i + 1];
              const nextStart = nextWord.start || wordEnd; 
@@ -453,7 +461,6 @@ ${metaItems}    </metadata>
          
          return `<span begin="${msToVtt(wordStart)}" end="${msToVtt(wordEnd)}">${escapeXML(w.text)}</span>`;
        });
-       // Replace raw text with spans
        content = '\n' + spans.map(s => `        ${s}`).join('\n') + '\n      ';
     }
     
@@ -473,13 +480,11 @@ ${body}
 
 const stringifyTXT = (cues: Cue[]): string => {
   let result = '';
-  // Threshold to consider a gap as a stanza break (e.g. 2000ms)
   const STANZA_BREAK_THRESHOLD = 2000;
 
   for (let i = 0; i < cues.length; i++) {
     result += cues[i].text + '\n';
     
-    // Check for gap to next cue to insert blank line
     if (i < cues.length - 1) {
       const currentEnd = cues[i].end;
       const nextStart = cues[i + 1].start;

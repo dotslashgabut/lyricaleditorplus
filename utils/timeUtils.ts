@@ -2,11 +2,19 @@
  * Converts milliseconds to HH:MM:SS,ms (SRT format)
  */
 export const msToSrt = (ms: number): string => {
-  const date = new Date(ms);
-  const h = Math.floor(ms / 3600000).toString().padStart(2, '0');
-  const m = date.getUTCMinutes().toString().padStart(2, '0');
-  const s = date.getUTCSeconds().toString().padStart(2, '0');
-  const mis = date.getUTCMilliseconds().toString().padStart(3, '0');
+  const totalSeconds = Math.floor(ms / 1000);
+  const milliseconds = Math.floor(ms % 1000);
+  
+  const seconds = totalSeconds % 60;
+  const totalMinutes = Math.floor(totalSeconds / 60);
+  const minutes = totalMinutes % 60;
+  const hours = Math.floor(totalMinutes / 60);
+
+  const h = hours.toString().padStart(2, '0');
+  const m = minutes.toString().padStart(2, '0');
+  const s = seconds.toString().padStart(2, '0');
+  const mis = milliseconds.toString().padStart(3, '0');
+
   return `${h}:${m}:${s},${mis}`;
 };
 
@@ -14,11 +22,17 @@ export const msToSrt = (ms: number): string => {
  * Converts milliseconds to MM:SS.xx (LRC format - 2 digit centiseconds)
  */
 export const msToLrc = (ms: number): string => {
-  const date = new Date(ms);
-  const m = Math.floor(ms / 60000).toString().padStart(2, '0');
-  const s = date.getUTCSeconds().toString().padStart(2, '0');
-  const centis = Math.floor(date.getUTCMilliseconds() / 10).toString().padStart(2, '0');
-  return `${m}:${s}.${centis}`;
+  const totalSeconds = Math.floor(ms / 1000);
+  const centiseconds = Math.floor((ms % 1000) / 10); // 10ms resolution
+  
+  const seconds = totalSeconds % 60;
+  const minutes = Math.floor(totalSeconds / 60); // LRC allows minutes > 60
+
+  const m = minutes.toString().padStart(2, '0');
+  const s = seconds.toString().padStart(2, '0');
+  const cs = centiseconds.toString().padStart(2, '0');
+
+  return `${m}:${s}.${cs}`;
 };
 
 /**
@@ -26,10 +40,16 @@ export const msToLrc = (ms: number): string => {
  * Used for high-precision UI inputs
  */
 export const msToMmSsMmm = (ms: number): string => {
-  const date = new Date(ms);
-  const m = Math.floor(ms / 60000).toString().padStart(2, '0');
-  const s = date.getUTCSeconds().toString().padStart(2, '0');
-  const mmm = date.getUTCMilliseconds().toString().padStart(3, '0');
+  const totalSeconds = Math.floor(ms / 1000);
+  const milliseconds = Math.floor(ms % 1000);
+  
+  const seconds = totalSeconds % 60;
+  const minutes = Math.floor(totalSeconds / 60);
+
+  const m = minutes.toString().padStart(2, '0');
+  const s = seconds.toString().padStart(2, '0');
+  const mmm = milliseconds.toString().padStart(3, '0');
+
   return `${m}:${s}.${mmm}`;
 };
 
@@ -37,11 +57,19 @@ export const msToMmSsMmm = (ms: number): string => {
  * Converts milliseconds to HH:MM:SS.ms (VTT format)
  */
 export const msToVtt = (ms: number): string => {
-  const date = new Date(ms);
-  const h = Math.floor(ms / 3600000).toString().padStart(2, '0');
-  const m = date.getUTCMinutes().toString().padStart(2, '0');
-  const s = date.getUTCSeconds().toString().padStart(2, '0');
-  const mis = date.getUTCMilliseconds().toString().padStart(3, '0');
+  const totalSeconds = Math.floor(ms / 1000);
+  const milliseconds = Math.floor(ms % 1000);
+  
+  const seconds = totalSeconds % 60;
+  const totalMinutes = Math.floor(totalSeconds / 60);
+  const minutes = totalMinutes % 60;
+  const hours = Math.floor(totalMinutes / 60);
+
+  const h = hours.toString().padStart(2, '0');
+  const m = minutes.toString().padStart(2, '0');
+  const s = seconds.toString().padStart(2, '0');
+  const mis = milliseconds.toString().padStart(3, '0');
+
   return `${h}:${m}:${s}.${mis}`;
 };
 
@@ -71,7 +99,7 @@ export const timeToMs = (timeStr: string): number => {
   
   // Check for LRC format (MM:SS.xx) or (MM:SS.xxx)
   // Expanded to support M:SS.xx (single digit minute)
-  const lrcMatch = cleanStr.match(/^(\d{1,2}):(\d{2})(?:\.(\d{1,3}))?$/);
+  const lrcMatch = cleanStr.match(/^(\d{1,3}):(\d{2})(?:\.(\d{1,3}))?$/);
   if (lrcMatch) {
     const m = parseInt(lrcMatch[1], 10);
     const s = parseInt(lrcMatch[2], 10);
@@ -96,28 +124,26 @@ export const timeToMs = (timeStr: string): number => {
     const msStr = fullMatch[4];
     let ms = parseInt(msStr, 10);
     
-    // Pad if less than 3 digits were provided but it's treated as decimal fraction logic in some contexts? 
-    // Usually SRT/VTT specifies 3 digits. If 1 digit provided like 00:00:01,5 -> 500ms
+    // Pad if less than 3 digits were provided
     if (msStr.length === 1) ms *= 100;
     else if (msStr.length === 2) ms *= 10;
 
     return (h * 3600000) + (m * 60000) + (s * 1000) + ms;
   }
 
-  // Fallback: check if it is just a number (seconds or ms?)
-  // If purely digits, usually ms in JSON or internal logic, but if float, could be seconds.
-  // We assume safe fallback: if matches numeric, parse as float. 
-  // IMPORTANT: For TTML, "10.5" without suffix is seconds. 
+  // Fallback: check if it is just a number
   if (/^\d+(\.\d+)?$/.test(cleanStr)) {
-     // If it looks like a small float (e.g. 10.5), it might be seconds. 
-     // If it looks like an integer (10500), it might be ms.
-     // This is ambiguous. However, in our parser context:
-     // - LRC timestamps are handled by regex above.
-     // - TTML `begin="10"` is usually seconds.
-     // Let's assume seconds if it has dot, ms if it doesn't? No, inconsistent.
-     // Let's rely on parsers passing unit-suffixed strings, or standard formats.
-     // But `parseFloat` is a reasonable fallback for "seconds" in XML contexts usually.
-     return parseFloat(cleanStr) * 1000;
+     const val = parseFloat(cleanStr);
+     // Heuristic: If it has a decimal point, assume seconds.
+     if (cleanStr.includes('.')) {
+         return val * 1000;
+     }
+     // If it's a large integer (likely ms), return as is? 
+     // Standards say "unitless = seconds". But for internal robustness:
+     // If we are parsing "60000" from a JSON string that meant ms, this will fail if we treat as seconds.
+     // However, timeToMs is primarily for "formatted time strings".
+     // We will stick to standard: Unitless = Seconds.
+     return val * 1000;
   }
 
   return 0;

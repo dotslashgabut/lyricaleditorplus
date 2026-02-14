@@ -1,5 +1,6 @@
 import { GoogleGenAI, Type, Modality } from "@google/genai";
 import { Cue, Word } from '../types';
+import { timeToMs } from '../utils/timeUtils';
 
 // Initialize Gemini API
 // Using process.env.API_KEY as per instructions
@@ -30,6 +31,24 @@ export interface TranscriptionOptions {
   model: string;
   mode: 'lines' | 'words';
 }
+
+/**
+ * Helper to safely parse timestamps from AI response
+ * Handles numbers, string numbers ("60000"), and formatted strings ("01:00.000")
+ */
+const parseAiTimestamp = (val: any): number => {
+    if (typeof val === 'number') return val;
+    if (typeof val === 'string') {
+        const trimmed = val.trim();
+        // If purely digits, treat as integer milliseconds
+        if (/^\d+$/.test(trimmed)) {
+            return parseInt(trimmed, 10);
+        }
+        // Otherwise try standard time parser
+        return timeToMs(trimmed);
+    }
+    return 0;
+};
 
 export const transcribeAudio = async (
   file: File, 
@@ -147,14 +166,14 @@ export const transcribeAudio = async (
       // Map to application Cue type
       return rawCues.map((c: any, index: number) => ({
         id: `ai-${index}-${Date.now()}`,
-        start: c.start || 0,
-        end: c.end || 0,
+        start: parseAiTimestamp(c.start),
+        end: parseAiTimestamp(c.end),
         text: c.text || '',
         words: c.words ? c.words.map((w: any, wi: number) => ({
           id: `ai-w-${index}-${wi}`,
           text: w.text,
-          start: w.start,
-          end: w.end
+          start: parseAiTimestamp(w.start),
+          end: parseAiTimestamp(w.end)
         })) : undefined
       }));
     }

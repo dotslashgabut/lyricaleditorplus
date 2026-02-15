@@ -86,8 +86,10 @@ export const msToVtt = (ms: number): string => {
 export const timeToMs = (timeStr: string): number => {
   if (!timeStr) return 0;
   
-  // Clean string and remove commas for safety
-  const cleanStr = timeStr.trim().replace(/,/g, '');
+  // Clean string and replace commas with dots for uniform decimal parsing.
+  // This ensures SRT formats "00:00:01,500" are parsed correctly by regexes expecting dots,
+  // and fixes potential issues with AI returning commas in numbers.
+  const cleanStr = timeStr.trim().replace(/,/g, '.');
 
   // Check for suffix formats (TTML/XML often uses these)
   if (cleanStr.endsWith('ms')) {

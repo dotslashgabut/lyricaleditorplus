@@ -39,30 +39,10 @@ export interface TranscriptionOptions {
 const parseAiTimestamp = (val: any): number => {
     if (typeof val === 'number') return Math.round(val);
     if (typeof val === 'string') {
-        const trimmed = val.trim().replace(/,/g, '');
-        
-        // If it contains a colon, it's a formatted time string (e.g. 01:00.000)
-        if (trimmed.includes(':')) {
-            return timeToMs(trimmed);
-        }
-
-        // If it explicitly says "ms", parse as float
-        if (trimmed.toLowerCase().endsWith('ms')) {
-            return parseFloat(trimmed);
-        }
-        
-        // If it explicitly says "s", parse and convert
-        if (trimmed.toLowerCase().endsWith('s')) {
-            return parseFloat(trimmed) * 1000;
-        }
-
-        // If it's a raw number (integer or float string without unit)
-        // Since we explicitly asked for "int (ms)" in the prompt, we treat unitless numbers as milliseconds.
-        // NOTE: timeToMs usually treats unitless as seconds. We override this here for AI reliability.
-        const num = parseFloat(trimmed);
-        if (!isNaN(num)) {
-            return Math.round(num);
-        }
+        // Standardize: replace comma with dot to ensure timeToMs handles it correctly
+        // timeToMs handles "MM:SS.mmm", "HH:MM:SS.mmm", and unit-suffixed strings
+        // like "12.34s" or "1234ms"
+        return timeToMs(val);
     }
     return 0;
 };
@@ -85,14 +65,14 @@ export const transcribeAudio = async (
   
   const timingInstructions = `
     CRITICAL TIMING INSTRUCTIONS:
-    1. Timestamps MUST be integers in MILLISECONDS (e.g., 1500, 65000).
-    2. DO NOT use "MM:SS" format. (Correct: 61000. Incorrect: 1:01).
-    3. Timestamps are ABSOLUTE from file start (0ms).
-    4. INSTRUMENTAL BREAKS & GAPS: 
+    1. Timestamps MUST be in 'MM:SS.mmm' format (e.g., 00:01.500 for 1.5s, 01:23.456 for 83.456s).
+    2. Use "HH:MM:SS.mmm" for durations longer than an hour.
+    3. Do NOT use integer milliseconds.
+    4. Timestamps are ABSOLUTE from file start (00:00.000).
+    5. INSTRUMENTAL BREAKS & GAPS: 
        - When music plays without vocals (solos, intros, bridges), do NOT generate text.
        - CRITICAL: When vocals resume, the timestamp MUST jump forward to match the actual elapsed time.
-       - Example: If vocals stop at 60000 (1 min) and resume after a 20s solo, the next timestamp must be ~80000.
-    5. 1 minute = 60000ms. 
+       - Example: If vocals stop at 01:00.000 and resume after a 20s solo, the next timestamp must be ~01:20.000.
   `;
 
   const commonRules = `
@@ -127,12 +107,12 @@ export const transcribeAudio = async (
        ${wordLevelInstructions}
        Format: Array of cues (lines).
        EACH CUE MUST HAVE A "words" ARRAY.
-       Word Schema: { text: string, start: int (ms), end: int (ms) }
+       Word Schema: { text: string, start: string (MM:SS.mmm), end: string (MM:SS.mmm) }
        ${timingInstructions}
        ${commonRules}`
     : `Transcribe audio to lyrics (JSON).
        Format: Array of cues (lines).
-       Cue Schema: { text: string, start: int (ms), end: int (ms) }
+       Cue Schema: { text: string, start: string (MM:SS.mmm), end: string (MM:SS.mmm) }
        ${timingInstructions}
        ${commonRules}`;
 
@@ -141,8 +121,8 @@ export const transcribeAudio = async (
     type: Type.OBJECT,
     properties: {
       text: { type: Type.STRING },
-      start: { type: Type.INTEGER },
-      end: { type: Type.INTEGER }
+      start: { type: Type.STRING },
+      end: { type: Type.STRING }
     },
     required: ['text', 'start', 'end']
   };
@@ -151,8 +131,8 @@ export const transcribeAudio = async (
     type: Type.OBJECT,
     properties: {
       text: { type: Type.STRING },
-      start: { type: Type.INTEGER },
-      end: { type: Type.INTEGER },
+      start: { type: Type.STRING },
+      end: { type: Type.STRING },
       words: {
         type: Type.ARRAY,
         items: wordSchema

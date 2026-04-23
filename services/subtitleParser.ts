@@ -10,7 +10,14 @@ export const detectFormat = (filename: string, content: string): SubtitleFormat 
   const trimmed = content.trim();
   
   // High-priority content checks
-  if (trimmed.startsWith('{') || trimmed.startsWith('[')) return SubtitleFormat.JSON;
+  if (trimmed.startsWith('{') || trimmed.startsWith('[')) {
+      try {
+          JSON.parse(trimmed);
+          return SubtitleFormat.JSON;
+      } catch (e) {
+          // Not valid JSON, continue with other checks (essential for .lrc bypass)
+      }
+  }
   if (trimmed.startsWith('WEBVTT')) return SubtitleFormat.VTT;
   
   if (filename.endsWith('.lrc')) return SubtitleFormat.LRC;

@@ -572,9 +572,9 @@ const CueList: React.FC<CueListProps> = ({ cues, onChange, onEditWords, currentM
                                     onSeek && onSeek(wordStart, true, wordEnd);
                                 }}
                                 title={issueTitle}
-                                className={`flex flex-col items-center p-2 rounded-lg border transition-all duration-200 cursor-pointer select-none relative pb-3
+                                className={`flex flex-col items-center p-2 rounded-lg border transition-colors duration-100 cursor-pointer select-none relative pb-3
                                     ${isWordActive 
-                                        ? 'bg-primary-100 dark:bg-primary-900/40 border-primary-500 scale-105 shadow-md z-10' 
+                                        ? 'bg-primary-100 dark:bg-primary-900/40 border-primary-500 shadow-sm z-10' 
                                         : hasIssue 
                                             ? 'bg-red-50 dark:bg-red-900/20 border-red-400 dark:border-red-600'
                                             : 'bg-neutral-100 dark:bg-neutral-800 border-neutral-200 dark:border-neutral-700 hover:border-primary-300 dark:hover:border-primary-700'

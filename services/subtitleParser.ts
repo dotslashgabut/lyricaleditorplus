@@ -66,7 +66,7 @@ const decodeEntities = (str: string) => {
 const parseLRC = (content: string): ParseResult => {
   const lines = content.split(/\r?\n/);
   const cues: Cue[] = [];
-  const regex = /\[(\d{1,3}:\d{2}(?:\.\d{2,3})?)\](.*)/;
+  const regex = /^((?:\s*\[\d{1,3}:\d{2}(?:\.\d{2,3})?\]\s*)+)(.*)/;
   // Improved regex: Allow optional hours (H:MM:SS), and handle various bracket styles if needed
   // This matches <00:00.00> or <00:00:00.000>
   const wordRegex = /<(\d{1,2}:\d{2}(?::\d{2})?(?:\.\d{1,3})?)>([^<]*)/g;
@@ -86,8 +86,15 @@ const parseLRC = (content: string): ParseResult => {
   lines.forEach((line, index) => {
     const match = line.match(regex);
     if (match) {
-      const start = timeToMs(match[1]);
+      const timestampsStr = match[1];
       let rawText = match[2];
+      
+      const times: number[] = [];
+      const tagRegex = /\[(\d{1,3}:\d{2}(?:\.\d{2,3})?)\]/g;
+      let tm;
+      while ((tm = tagRegex.exec(timestampsStr)) !== null) {
+        times.push(timeToMs(tm[1]));
+      }
       
       // Decode entities immediately
       rawText = decodeEntities(rawText);
@@ -113,15 +120,20 @@ const parseLRC = (content: string): ParseResult => {
         text = text.trim();
       }
 
-      cues.push({
-        id: `lrc-${index}`,
-        start,
-        end: start + 3000, // Placeholder end time for LRC
-        text,
-        words: words.length > 0 ? words : undefined
+      times.forEach((start, tIndex) => {
+          cues.push({
+            id: `lrc-${index}-${tIndex}`,
+            start,
+            end: start + 3000, // Placeholder end time for LRC
+            text,
+            words: words.length > 0 ? [...words] : undefined
+          });
       });
     }
   });
+
+  // Sort cues by start time since multiple tags might put them out of order sequentially
+  cues.sort((a, b) => a.start - b.start);
 
   // Infer end times
   for (let i = 0; i < cues.length - 1; i++) {

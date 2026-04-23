@@ -116,6 +116,7 @@ export function App() {
   const [viewMode, setViewMode] = useState<'line' | 'word'>('line');
   const [metadata, setMetadata] = useState<Metadata>({ title: '', artist: '', album: '', by: '' });
   const [selectedCueIds, setSelectedCueIds] = useState<Set<string>>(new Set());
+  const [lastSelectedIndex, setLastSelectedIndex] = useState<number | null>(null);
   
   // History State for Undo/Redo
   const [history, setHistory] = useState<Cue[][]>([]);
@@ -403,16 +404,26 @@ export function App() {
   };
 
   const handleToggleSelection = (id: string, shiftKey: boolean) => {
+      const index = cues.findIndex(c => c.id === id);
+      if (index === -1) return;
+
       const newSelection = new Set(selectedCueIds);
       
-      if (shiftKey && selectedCueIds.size > 0) {
-          // Find range if needed, for now simple toggle is fine or range logic here
-          // Implementing simple toggle for now as per request "select some rows"
-          if (newSelection.has(id)) newSelection.delete(id);
-          else newSelection.add(id);
+      if (shiftKey && lastSelectedIndex !== null) {
+          const start = Math.min(lastSelectedIndex, index);
+          const end = Math.max(lastSelectedIndex, index);
+          
+          // Select range
+          for (let i = start; i <= end; i++) {
+              newSelection.add(cues[i].id);
+          }
       } else {
-          if (newSelection.has(id)) newSelection.delete(id);
-          else newSelection.add(id);
+          if (newSelection.has(id)) {
+              newSelection.delete(id);
+          } else {
+              newSelection.add(id);
+          }
+          setLastSelectedIndex(index);
       }
       setSelectedCueIds(newSelection);
   };
@@ -445,6 +456,7 @@ export function App() {
       setHistory([parsedCues]);
       setHistoryIndex(0);
       setSelectedCueIds(new Set());
+      setLastSelectedIndex(null);
     };
     reader.readAsText(file);
   };
@@ -505,6 +517,7 @@ export function App() {
     setHistory([[]]);
     setHistoryIndex(0);
     setSelectedCueIds(new Set());
+    setLastSelectedIndex(null);
   };
 
   const confirmCreateNew = () => {
@@ -629,6 +642,9 @@ export function App() {
     else if (format === SubtitleFormat.TTML || format === SubtitleFormat.TTML_KARAOKE) ext = 'ttml';
     else if (format === SubtitleFormat.JSON) ext = 'json';
     else if (format === SubtitleFormat.TXT) ext = 'txt';
+    else if (format === SubtitleFormat.SRV1) ext = 'srv1';
+    else if (format === SubtitleFormat.SRV2) ext = 'srv2';
+    else if (format === SubtitleFormat.SRV3) ext = 'srv3';
     
     a.download = `${baseName}.${ext}`;
     document.body.appendChild(a);
@@ -840,10 +856,14 @@ export function App() {
           delete newCue.words;
           updatedCues[editingWordIndex] = newCue;
       } else {
+          // Reconstruct text from words to keep them in sync
+          const newText = words.map(w => w.text).join(' ');
+
           // Clone the cue object before modifying 'words' to prevent history mutation
           updatedCues[editingWordIndex] = {
               ...updatedCues[editingWordIndex],
-              words: words
+              words: words,
+              text: newText
           };
       }
       updateCues(updatedCues);
@@ -935,6 +955,9 @@ export function App() {
           case SubtitleFormat.TTML_KARAOKE: return 'TTML (Words)';
           case SubtitleFormat.JSON: return 'Structured JSON';
           case SubtitleFormat.TXT: return 'Plain Text (.txt)';
+          case SubtitleFormat.SRV1: return 'YouTube SRV1';
+          case SubtitleFormat.SRV2: return 'YouTube SRV2';
+          case SubtitleFormat.SRV3: return 'YouTube SRV3';
           default: return fmt.toUpperCase();
       }
   };
@@ -1042,7 +1065,7 @@ export function App() {
                             type="file" 
                             className="hidden" 
                             multiple
-                            accept=".lrc,.srt,.vtt,.xml,.ttml,.txt,.json,audio/*,video/*,.mp3,.wav,.ogg,.m4a,.mp4,.webm,.ogv,.mov,.mkv"
+                            accept=".lrc,.srt,.vtt,.xml,.ttml,.txt,.json,.srv1,.srv2,.srv3,audio/*,video/*,.mp3,.wav,.ogg,.m4a,.mp4,.webm,.ogv,.mov,.mkv"
                             onChange={(e) => e.target.files && handleFileProcessing(e.target.files)}
                         />
                     </div>
@@ -1344,6 +1367,16 @@ export function App() {
                     <div className="h-px bg-neutral-100 dark:bg-neutral-800 my-2"></div>
                     
                     <div className="text-[10px] font-bold text-neutral-400 px-3 py-2 uppercase tracking-widest">Other Formats</div>
+                    {[SubtitleFormat.SRV1, SubtitleFormat.SRV2, SubtitleFormat.SRV3].map(fmt => (
+                       <button 
+                         key={fmt}
+                         onClick={() => handleExport(fmt)}
+                         className="w-full text-left px-3 py-2 rounded-lg hover:bg-neutral-100 dark:hover:bg-neutral-800 text-sm font-medium transition flex items-center justify-between group"
+                       >
+                         <span className="flex items-center gap-2"><FileText size={14} className="text-red-500" />{getFormatDisplayName(fmt)}</span>
+                         <Download size={14} className="opacity-0 group-hover:opacity-100 transition-opacity text-neutral-400" />
+                       </button>
+                    ))}
                     <button 
                         onClick={() => handleExport(SubtitleFormat.JSON)}
                         className="w-full text-left px-3 py-2 rounded-lg hover:bg-neutral-100 dark:hover:bg-neutral-800 text-sm font-medium transition flex items-center justify-between group"
@@ -1596,7 +1629,7 @@ export function App() {
                            <input 
                                type="file" 
                                className="hidden" 
-                               accept=".lrc,.srt,.vtt,.xml,.ttml,.txt,.json"
+                               accept=".lrc,.srt,.vtt,.xml,.ttml,.txt,.json,.srv1,.srv2,.srv3"
                                onChange={(e) => e.target.files?.[0] && processSubtitleFile(e.target.files[0])} 
                            />
                         </label>
@@ -1800,8 +1833,8 @@ export function App() {
                       {selectedCueIds.size > 0 ? `Applying to ${selectedCueIds.size} selected row(s)` : 'Applying to all rows'}
                   </div>
                   <div className="space-y-3">
-                      <button onClick={() => { shiftAllTimes(100); setIsShiftModalOpen(false); }} className="w-full py-2 bg-neutral-100 dark:bg-neutral-800 rounded-lg text-sm hover:bg-neutral-200 dark:hover:bg-neutral-700 transition">+100ms</button>
-                      <button onClick={() => { shiftAllTimes(-100); setIsShiftModalOpen(false); }} className="w-full py-2 bg-neutral-100 dark:bg-neutral-800 rounded-lg text-sm hover:bg-neutral-200 dark:hover:bg-neutral-700 transition">-100ms</button>
+                      <button onClick={() => shiftAllTimes(100)} className="w-full py-2 bg-neutral-100 dark:bg-neutral-800 rounded-lg text-sm hover:bg-neutral-200 dark:hover:bg-neutral-700 transition">+100ms</button>
+                      <button onClick={() => shiftAllTimes(-100)} className="w-full py-2 bg-neutral-100 dark:bg-neutral-800 rounded-lg text-sm hover:bg-neutral-200 dark:hover:bg-neutral-700 transition">-100ms</button>
                       <div className="flex gap-2 pt-2">
                          <input type="number" value={customShiftAmount} onChange={(e) => setCustomShiftAmount(Number(e.target.value))} placeholder="ms" className="flex-1 px-3 py-2 bg-neutral-50 dark:bg-neutral-950 border border-neutral-300 dark:border-neutral-700 rounded-lg text-sm" />
                          <button onClick={() => { shiftAllTimes(customShiftAmount); setIsShiftModalOpen(false); }} className="px-4 py-2 bg-primary-600 text-white rounded-lg text-sm font-medium">Shift</button>

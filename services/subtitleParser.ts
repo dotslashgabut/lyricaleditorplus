@@ -7,18 +7,35 @@ export interface ParseResult {
 }
 
 export const detectFormat = (filename: string, content: string): SubtitleFormat => {
+  const trimmed = content.trim();
+  
+  // High-priority content checks
+  if (trimmed.startsWith('{') || trimmed.startsWith('[')) return SubtitleFormat.JSON;
+  if (trimmed.startsWith('WEBVTT')) return SubtitleFormat.VTT;
+  
   if (filename.endsWith('.lrc')) return SubtitleFormat.LRC;
   if (filename.endsWith('.srt')) return SubtitleFormat.SRT;
   if (filename.endsWith('.vtt')) return SubtitleFormat.VTT;
-  if (filename.endsWith('.xml') || filename.endsWith('.ttml')) return SubtitleFormat.TTML;
+  if (filename.endsWith('.xml') || filename.endsWith('.ttml') || filename.endsWith('.srv1') || filename.endsWith('.srv2') || filename.endsWith('.srv3')) {
+    if (content.includes('<transcript>')) return SubtitleFormat.SRV1;
+    if (content.includes('<timedtext format="3"')) return SubtitleFormat.SRV3;
+    if (content.includes('<timedtext')) return SubtitleFormat.SRV2;
+    if (content.includes('http://www.w3.org/ns/ttml')) return SubtitleFormat.TTML;
+    
+    // Guess based on extension if XML tags didn't match perfectly
+    if (filename.endsWith('.srv1')) return SubtitleFormat.SRV1;
+    if (filename.endsWith('.srv2')) return SubtitleFormat.SRV2;
+    if (filename.endsWith('.srv3')) return SubtitleFormat.SRV3;
+    return SubtitleFormat.TTML;
+  }
   if (filename.endsWith('.json')) return SubtitleFormat.JSON;
   if (filename.endsWith('.txt')) return SubtitleFormat.TXT;
 
   // Fallback content checks
-  const trimmed = content.trim();
-  if (trimmed.startsWith('{') || trimmed.startsWith('[')) return SubtitleFormat.JSON;
-  if (trimmed.startsWith('WEBVTT')) return SubtitleFormat.VTT;
   if (content.includes('http://www.w3.org/ns/ttml')) return SubtitleFormat.TTML;
+  if (content.includes('<transcript>')) return SubtitleFormat.SRV1;
+  if (content.includes('<timedtext format="3"')) return SubtitleFormat.SRV3;
+  if (content.includes('<timedtext')) return SubtitleFormat.SRV2;
   if (/^\[\d{2}:\d{2}\.\d{2}\]/.test(content)) return SubtitleFormat.LRC;
   
   return SubtitleFormat.SRT; // Default
@@ -326,6 +343,58 @@ const parseTTML = (content: string): ParseResult => {
 const parseJSON = (content: string): ParseResult => {
     try {
         const parsed = JSON.parse(content);
+        
+        // Handle YouTube JSON3 format
+        if (parsed.events) {
+             const cues: Cue[] = [];
+             parsed.events.forEach((event: any, i: number) => {
+                 if (!event.segs && !event.utf8) return;
+                 const startMs = event.tStartMs || 0;
+                 const durMs = event.dDurationMs || 2000;
+                 const endMs = startMs + durMs;
+                 
+                 const words: Word[] = [];
+                 let text = '';
+                 
+                 if (event.segs) {
+                     event.segs.forEach((seg: any, j: number) => {
+                         const segText = seg.utf8 || '';
+                         const tOffset = seg.tOffsetMs || 0;
+                         if (segText.trim()) {
+                             words.push({
+                                 id: `json3-w-${i}-${j}`,
+                                 text: decodeEntities(segText.trim()),
+                                 start: startMs + tOffset
+                             });
+                         }
+                         text += segText;
+                     });
+                 } else if (event.utf8) {
+                     text = event.utf8;
+                 }
+                 
+                 if (text.trim()) {
+                     // Add end times to words if not present
+                     for (let w = 0; w < words.length; w++) {
+                         if (words[w].end === undefined) {
+                             words[w].end = (w < words.length - 1 && words[w+1].start !== undefined) 
+                                 ? words[w+1].start 
+                                 : endMs;
+                         }
+                     }
+                     
+                     cues.push({
+                         id: `json3-${i}`,
+                         start: startMs,
+                         end: endMs,
+                         text: decodeEntities(text).replace(/\n/g, ' ').trim(),
+                         words: words.length > 0 ? words : undefined
+                     });
+                 }
+             });
+             return { cues, metadata: {} };
+        }
+
         const cuesRaw = Array.isArray(parsed) ? parsed : (parsed.cues || []);
         const metadata = (!Array.isArray(parsed) && parsed.metadata) ? parsed.metadata : { title: '', artist: '', album: '', by: '' };
         
@@ -503,6 +572,233 @@ const stringifyJSON = (cues: Cue[], metadata?: Metadata): string => {
   return JSON.stringify({ metadata, cues }, null, 2);
 };
 
+const parseSRV1 = (content: string): ParseResult => {
+  const parser = new DOMParser();
+  const xmlDoc = parser.parseFromString(content, "text/xml");
+  const texts = xmlDoc.getElementsByTagName("text");
+  const cues: Cue[] = [];
+
+  for (let i = 0; i < texts.length; i++) {
+    const textNode = texts[i];
+    const startStr = textNode.getAttribute("start");
+    const durStr = textNode.getAttribute("dur");
+    
+    if (!startStr) continue;
+    
+    const startMs = Math.round(parseFloat(startStr) * 1000);
+    const durMs = durStr ? Math.round(parseFloat(durStr) * 1000) : 2000;
+    const text = textNode.textContent || "";
+
+    cues.push({
+      id: `srv1-${i}`,
+      start: startMs,
+      end: startMs + durMs,
+      text: decodeEntities(text).replace(/\n/g, ' ').trim()
+    });
+  }
+
+  return { cues, metadata: {} };
+};
+
+const parseSRV2_3 = (content: string, formatId: string): ParseResult => {
+  const parser = new DOMParser();
+  const xmlDoc = parser.parseFromString(content, "text/xml");
+  const ps = xmlDoc.getElementsByTagName("p");
+  const cues: Cue[] = [];
+
+  // 1. Try standard SRV2/3 structure with <p> and optionally <s>
+  if (ps.length > 0) {
+      for (let i = 0; i < ps.length; i++) {
+        const p = ps[i];
+        const tStr = p.getAttribute("t");
+        const dStr = p.getAttribute("d");
+        
+        if (!tStr) continue;
+        
+        const startMs = parseInt(tStr, 10);
+        const durMs = dStr ? parseInt(dStr, 10) : 2000;
+        
+        const words: Word[] = [];
+        const spans = p.getElementsByTagName("s");
+        
+        let text = p.textContent || "";
+        if (spans.length > 0) {
+            let currentOffset = 0;
+            for (let j = 0; j < spans.length; j++) {
+                const span = spans[j];
+                const tOffset = span.getAttribute("t");
+                
+                if (tOffset) {
+                    currentOffset = parseInt(tOffset, 10);
+                }
+                
+                const wText = span.textContent || "";
+                if (!wText.trim()) continue;
+                
+                words.push({
+                    id: `${formatId}-w-${i}-${j}`,
+                    text: decodeEntities(wText.trim()),
+                    start: startMs + currentOffset
+                });
+            }
+            text = words.map(w => w.text).join(' ');
+            
+            // Add end times to words
+            for (let w = 0; w < words.length; w++) {
+                if (words[w].end === undefined) {
+                    words[w].end = (w < words.length - 1 && words[w+1].start !== undefined) 
+                        ? words[w+1].start 
+                        : startMs + durMs;
+                }
+            }
+        } else {
+            text = decodeEntities(text).replace(/\n/g, ' ').trim();
+        }
+
+        cues.push({
+          id: `${formatId}-${i}`,
+          start: startMs,
+          end: startMs + durMs,
+          text: text,
+          words: words.length > 0 ? words : undefined
+        });
+      }
+      return { cues, metadata: {} };
+  }
+
+  // 2. Try alternate SRV structure with <text append="1">
+  const texts = xmlDoc.getElementsByTagName("text");
+  if (texts.length > 0) {
+      let currentCue: Partial<Cue> | null = null;
+      let words: Word[] = [];
+      
+      for (let i = 0; i < texts.length; i++) {
+          const textNode = texts[i];
+          const tStr = textNode.getAttribute("t") || textNode.getAttribute("start");
+          const dStr = textNode.getAttribute("d") || textNode.getAttribute("dur");
+          const append = textNode.getAttribute("append") === "1";
+          
+          if (!tStr) continue;
+          
+          let startMs = 0;
+          let durMs = 2000;
+          if (tStr.includes('.')) {
+              startMs = Math.round(parseFloat(tStr) * 1000);
+          } else {
+              startMs = parseInt(tStr, 10);
+          }
+          if (dStr) {
+              if (dStr.includes('.')) durMs = Math.round(parseFloat(dStr) * 1000);
+              else durMs = parseInt(dStr, 10);
+          }
+          
+          let rawContent = textNode.textContent || "";
+          
+          if (!append || !currentCue) {
+              // Finalize previous cue
+              if (currentCue) {
+                  if (words.length > 0) {
+                      for (let w = 0; w < words.length - 1; w++) {
+                          words[w].end = words[w + 1].start;
+                      }
+                      words[words.length - 1].end = currentCue.end;
+                      currentCue.words = words;
+                      currentCue.text = words.map(w => w.text).join(' ');
+                  }
+                  if (currentCue.text) cues.push(currentCue as Cue);
+              }
+              
+              currentCue = {
+                  id: `${formatId}-${i}`,
+                  start: startMs,
+                  end: startMs + durMs,
+                  text: ''
+              };
+              words = [];
+              if (rawContent.trim() && rawContent.trim() !== '\n') {
+                  words.push({
+                      id: `${formatId}-w-${i}`,
+                      text: decodeEntities(rawContent).trim(),
+                      start: startMs,
+                      end: startMs + durMs
+                  });
+              }
+          } else {
+              if (rawContent === '\n' || rawContent === '\r\n') {
+                  if (currentCue) {
+                      currentCue.end = startMs;
+                  }
+              } else if (rawContent.trim()) {
+                  words.push({
+                      id: `${formatId}-w-${i}`,
+                      text: decodeEntities(rawContent).trim(),
+                      start: startMs,
+                      end: startMs + durMs
+                  });
+                  if (currentCue) {
+                      currentCue.end = Math.max(currentCue.end as number, startMs + durMs);
+                  }
+              }
+          }
+      }
+
+      // Finalize last cue
+      if (currentCue) {
+          if (words.length > 0) {
+              for (let w = 0; w < words.length - 1; w++) {
+                  words[w].end = words[w + 1].start;
+              }
+              words[words.length - 1].end = currentCue.end;
+              currentCue.words = words;
+              currentCue.text = words.map(w => w.text).join(' ');
+          }
+          if (currentCue.text) cues.push(currentCue as Cue);
+      }
+  }
+
+  return { cues, metadata: {} };
+};
+
+const stringifySRV1 = (cues: Cue[]): string => {
+  let xml = `<?xml version="1.0" encoding="utf-8" ?>\n<transcript>\n`;
+  for(const cue of cues) {
+    const startDec = (cue.start / 1000).toFixed(3);
+    const durDec = ((cue.end - cue.start) / 1000).toFixed(3);
+    xml += `  <text start="${startDec}" dur="${durDec}">${escapeXML(cue.text)}</text>\n`;
+  }
+  xml += `</transcript>`;
+  return xml;
+};
+
+const stringifySRV2 = (cues: Cue[]): string => {
+  let xml = `<?xml version="1.0" encoding="utf-8" ?>\n<timedtext format="2">\n  <body>\n`;
+  for(const cue of cues) {
+    const durMs = cue.end - cue.start;
+    xml += `    <p t="${cue.start}" d="${durMs}">${escapeXML(cue.text)}</p>\n`;
+  }
+  xml += `  </body>\n</timedtext>`;
+  return xml;
+};
+
+const stringifySRV3 = (cues: Cue[]): string => {
+  let xml = `<?xml version="1.0" encoding="utf-8" ?>\n<timedtext format="3">\n  <body>\n`;
+  for(const cue of cues) {
+    const durMs = cue.end - cue.start;
+    let content = escapeXML(cue.text);
+    
+    if (cue.words && cue.words.length > 0) {
+       content = cue.words.map(w => {
+           const offset = (w.start !== undefined ? (w.start - cue.start) : 0);
+           return `<s t="${offset}">${escapeXML(w.text)}</s>`;
+       }).join('');
+    }
+    
+    xml += `    <p t="${cue.start}" d="${durMs}">${content}</p>\n`;
+  }
+  xml += `  </body>\n</timedtext>`;
+  return xml;
+};
+
 // --- Public API ---
 
 export const parseContent = (content: string, format: SubtitleFormat): ParseResult => {
@@ -516,6 +812,12 @@ export const parseContent = (content: string, format: SubtitleFormat): ParseResu
       return parseVTT(content);
     case SubtitleFormat.TTML:
       return parseTTML(content);
+    case SubtitleFormat.SRV1:
+      return parseSRV1(content);
+    case SubtitleFormat.SRV2:
+      return parseSRV2_3(content, 'srv2');
+    case SubtitleFormat.SRV3:
+      return parseSRV2_3(content, 'srv3');
     case SubtitleFormat.JSON:
       return parseJSON(content);
     case SubtitleFormat.TXT:
@@ -549,6 +851,12 @@ export const stringifyContent = (cues: Cue[], format: SubtitleFormat, metadata?:
       return stringifyTTML(cues, false, metadata);
     case SubtitleFormat.TTML_KARAOKE:
       return stringifyTTML(cues, true, metadata);
+    case SubtitleFormat.SRV1:
+      return stringifySRV1(cues);
+    case SubtitleFormat.SRV2:
+      return stringifySRV2(cues);
+    case SubtitleFormat.SRV3:
+      return stringifySRV3(cues);
     case SubtitleFormat.TXT:
       return stringifyTXT(cues);
     case SubtitleFormat.JSON:

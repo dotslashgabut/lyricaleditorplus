@@ -21,6 +21,9 @@ export enum SubtitleFormat {
   VTT_KARAOKE = 'vtt_karaoke',
   TTML = 'ttml',
   TTML_KARAOKE = 'ttml_karaoke',
+  SRV1 = 'srv1',
+  SRV2 = 'srv2',
+  SRV3 = 'srv3',
   TXT = 'txt',
   JSON = 'json'
 }

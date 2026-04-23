@@ -644,7 +644,7 @@ export function App() {
     else if (format === SubtitleFormat.TXT) ext = 'txt';
     else if (format === SubtitleFormat.SRV1) ext = 'srv1';
     else if (format === SubtitleFormat.SRV2) ext = 'srv2';
-    else if (format === SubtitleFormat.SRV3) ext = 'srv3';
+    else if (format === SubtitleFormat.SRV3 || format === SubtitleFormat.SRV3_KARAOKE) ext = 'srv3';
     
     a.download = `${baseName}.${ext}`;
     document.body.appendChild(a);
@@ -958,6 +958,7 @@ export function App() {
           case SubtitleFormat.SRV1: return 'YouTube SRV1';
           case SubtitleFormat.SRV2: return 'YouTube SRV2';
           case SubtitleFormat.SRV3: return 'YouTube SRV3';
+          case SubtitleFormat.SRV3_KARAOKE: return 'YouTube SRV (Words)';
           default: return fmt.toUpperCase();
       }
   };
@@ -1353,7 +1354,7 @@ export function App() {
                     <div className="h-px bg-neutral-100 dark:bg-neutral-800 my-2"></div>
                     
                     <div className="text-[10px] font-bold text-neutral-400 px-3 py-2 uppercase tracking-widest">Karaoke (Word-Level)</div>
-                    {[SubtitleFormat.LRC_ENHANCED, SubtitleFormat.VTT_KARAOKE, SubtitleFormat.TTML_KARAOKE].map(fmt => (
+                    {[SubtitleFormat.LRC_ENHANCED, SubtitleFormat.VTT_KARAOKE, SubtitleFormat.TTML_KARAOKE, SubtitleFormat.SRV3_KARAOKE].map(fmt => (
                        <button 
                          key={fmt}
                          onClick={() => handleExport(fmt)}

@@ -2,7 +2,7 @@
 
 **The Ultimate Modern Lyrics & Subtitle Editor**
 
-Lyrical Editor Plus is a professional-grade, web-based tool designed for creators who need precision, speed, and flexibility. Built with a mobile-first approach, it offers a sleek, dark-mode-ready interface for editing **LRC**, **SRT**, **VTT**, and **TTML** files.
+Lyrical Editor Plus is a professional-grade, web-based tool designed for creators who need precision, speed, and flexibility. Built with a mobile-first approach, it offers a sleek, dark-mode-ready interface for editing **LRC**, **SRT**, **VTT**, **TTML**, and **YouTube SRV** files.
 
 For a version with Web Speech API Text-to-Speech, use the `web-speech-api` branch.
 
@@ -13,7 +13,7 @@ Powered by **Google Gemini AI**, it automates tedious tasks like transcription, 
 ## 🚀 Key Features
 
 ### 🎧 Universal Media & Format Support
-*   **Formats:** Full support for `LRC` (Simple & Enhanced), `SRT`, `VTT`, `TTML`, `JSON`, and `TXT`.
+*   **Formats:** Full support for `LRC` (Simple & Enhanced), `SRT`, `VTT`, `TTML`, `JSON`, `TXT`, and **YouTube SRV** formats (`SRV1`, `SRV2`, `SRV3`, including YouTube `JSON3` variants).
 *   **Media Sync:** Load any audio or video file to visualize playback. The editor locks sync with your media for frame-perfect timing.
 *   **Responsive Design:** Optimized for desktops, tablets, and mobile devices with a seamless **Light/Dark mode** toggle.
 
@@ -23,7 +23,7 @@ Powered by **Google Gemini AI**, it automates tedious tasks like transcription, 
 *   **Smart Refinement:** Use the AI Assistant to translate, fix grammar, or reformat lyrics with natural language instructions.
 
 ### 🎚️ Precision Editing Tools
-*   **Karaoke Mode:** Deep dive into 'Word' view to adjust millisecond-level timing for individual words.
+*   **Karaoke Mode:** Deep dive into 'Word' view to adjust millisecond-level timing for individual words. Built-in support for YouTube word-level timing (`append="1"` and `<s>` tags).
 *   **Text-to-Speech (TTS):** Built-in pronunciation checks. Click the speaker icon on any line or word to hear it spoken.
 *   **Hot Fixes:** One-click tools to:
     *   Compact whitespace
@@ -54,9 +54,9 @@ Located in the **Global Tools** menu and bottom toolbar:
 
 ## 📦 Export Options
 
-*   **Subtitles:** `SRT`, `VTT`, `TTML`, `LRC`
-*   **Karaoke:** `Enhanced LRC`, `VTT (Karaoke)`, `TTML (Span tags)`
-*   **Data:** `JSON`, `TXT`
+*   **Subtitles:** `SRT`, `VTT`, `TTML`, `LRC`, `YouTube SRV1/SRV2/SRV3`
+*   **Karaoke:** `Enhanced LRC`, `VTT (Karaoke)`, `TTML (Span tags)`, `YouTube SRV (Words)`
+*   **Data:** `Structured JSON`, `TXT`
 
 ## 🔧 Setup & Installation
 
@@ -67,7 +67,7 @@ Located in the **Global Tools** menu and bottom toolbar:
     ```
 3.  Create a `.env` file and add your Google Gemini API key:
     ```env
-    API_KEY=your_google_api_key
+    GEMINI_API_KEY=your_google_api_key
     ```
 4.  Start the development server:
     ```bash

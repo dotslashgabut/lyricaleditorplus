@@ -24,6 +24,7 @@ export enum SubtitleFormat {
   SRV1 = 'srv1',
   SRV2 = 'srv2',
   SRV3 = 'srv3',
+  SRV3_KARAOKE = 'srv3_karaoke',
   TXT = 'txt',
   JSON = 'json'
 }

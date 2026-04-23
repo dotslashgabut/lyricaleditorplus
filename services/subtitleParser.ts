@@ -780,6 +780,32 @@ const stringifySRV2 = (cues: Cue[]): string => {
   return xml;
 };
 
+const stringifySRV3Karaoke = (cues: Cue[]): string => {
+  let xml = `<?xml version="1.0" encoding="utf-8" ?>\n<timedtext>\n`;
+  for (const cue of cues) {
+     if (cue.words && cue.words.length > 0) {
+         for (let i = 0; i < cue.words.length; i++) {
+             const w = cue.words[i];
+             const startMs = w.start !== undefined ? w.start : cue.start;
+             const endMs = w.end !== undefined ? w.end : cue.end;
+             const durMs = Math.max(0, endMs - startMs);
+             let content = escapeXML(w.text).trim();
+             
+             if (i > 0) {
+                 xml += `  <text t="${startMs}" d="${durMs}" append="1"> ${content}</text>\n`;
+             } else {
+                 xml += `  <text t="${startMs}" d="${durMs}">${content}</text>\n`;
+             }
+         }
+     } else {
+         const durMs = cue.end - cue.start;
+         xml += `  <text t="${cue.start}" d="${durMs}">${escapeXML(cue.text).trim()}</text>\n`;
+     }
+  }
+  xml += `</timedtext>`;
+  return xml;
+};
+
 const stringifySRV3 = (cues: Cue[]): string => {
   let xml = `<?xml version="1.0" encoding="utf-8" ?>\n<timedtext format="3">\n  <body>\n`;
   for(const cue of cues) {
@@ -787,9 +813,10 @@ const stringifySRV3 = (cues: Cue[]): string => {
     let content = escapeXML(cue.text);
     
     if (cue.words && cue.words.length > 0) {
-       content = cue.words.map(w => {
+       content = cue.words.map((w, i) => {
            const offset = (w.start !== undefined ? (w.start - cue.start) : 0);
-           return `<s t="${offset}">${escapeXML(w.text)}</s>`;
+           const space = i > 0 ? ' ' : '';
+           return `${space}<s t="${offset}">${escapeXML(w.text.trim())}</s>`;
        }).join('');
     }
     
@@ -817,6 +844,7 @@ export const parseContent = (content: string, format: SubtitleFormat): ParseResu
     case SubtitleFormat.SRV2:
       return parseSRV2_3(content, 'srv2');
     case SubtitleFormat.SRV3:
+    case SubtitleFormat.SRV3_KARAOKE:
       return parseSRV2_3(content, 'srv3');
     case SubtitleFormat.JSON:
       return parseJSON(content);
@@ -857,6 +885,8 @@ export const stringifyContent = (cues: Cue[], format: SubtitleFormat, metadata?:
       return stringifySRV2(cues);
     case SubtitleFormat.SRV3:
       return stringifySRV3(cues);
+    case SubtitleFormat.SRV3_KARAOKE:
+      return stringifySRV3Karaoke(cues);
     case SubtitleFormat.TXT:
       return stringifyTXT(cues);
     case SubtitleFormat.JSON:

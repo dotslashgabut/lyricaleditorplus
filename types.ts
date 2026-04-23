@@ -26,7 +26,8 @@ export enum SubtitleFormat {
   SRV3 = 'srv3',
   SRV3_KARAOKE = 'srv3_karaoke',
   TXT = 'txt',
-  JSON = 'json'
+  JSON = 'json',
+  JSON3 = 'json3'
 }
 
 export interface FileData {

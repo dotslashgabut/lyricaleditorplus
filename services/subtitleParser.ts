@@ -833,6 +833,41 @@ const stringifySRV3 = (cues: Cue[]): string => {
   return xml;
 };
 
+const stringifyJSON3 = (cues: Cue[], metadata?: Metadata): string => {
+  const events = cues.map(cue => {
+      const startMs = Math.round(cue.start);
+      const durMs = Math.round(cue.end - cue.start);
+      
+      let segs;
+      if (cue.words && cue.words.length > 0) {
+          segs = cue.words.map((w, i) => {
+              const wStart = w.start !== undefined ? Math.round(w.start) : startMs;
+              let wText = w.text;
+              if (i < cue.words!.length - 1 && !wText.endsWith(' ')) {
+                  wText += ' '; // Add spacing between words for YouTube format
+              }
+              return {
+                  utf8: wText,
+                  tOffsetMs: Math.max(0, wStart - startMs)
+              };
+          });
+      } else {
+          segs = [{
+              utf8: cue.text,
+              tOffsetMs: 0
+          }];
+      }
+      
+      return {
+          tStartMs: startMs,
+          dDurationMs: durMs,
+          segs: segs
+      };
+  });
+  
+  return JSON.stringify({ metadata, events }, null, 2);
+};
+
 // --- Public API ---
 
 export const parseContent = (content: string, format: SubtitleFormat): ParseResult => {
@@ -854,6 +889,7 @@ export const parseContent = (content: string, format: SubtitleFormat): ParseResu
     case SubtitleFormat.SRV3_KARAOKE:
       return parseSRV2_3(content, 'srv3');
     case SubtitleFormat.JSON:
+    case SubtitleFormat.JSON3:
       return parseJSON(content);
     case SubtitleFormat.TXT:
       return {
@@ -898,6 +934,8 @@ export const stringifyContent = (cues: Cue[], format: SubtitleFormat, metadata?:
       return stringifyTXT(cues);
     case SubtitleFormat.JSON:
       return stringifyJSON(cues, metadata);
+    case SubtitleFormat.JSON3:
+      return stringifyJSON3(cues, metadata);
     default:
       return stringifySRT(cues);
   }

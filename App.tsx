@@ -640,7 +640,7 @@ export function App() {
     if (format === SubtitleFormat.LRC_ENHANCED) ext = 'lrc';
     else if (format === SubtitleFormat.VTT_KARAOKE) ext = 'vtt';
     else if (format === SubtitleFormat.TTML || format === SubtitleFormat.TTML_KARAOKE) ext = 'ttml';
-    else if (format === SubtitleFormat.JSON) ext = 'json';
+    else if (format === SubtitleFormat.JSON || format === SubtitleFormat.JSON3) ext = 'json';
     else if (format === SubtitleFormat.TXT) ext = 'txt';
     else if (format === SubtitleFormat.SRV1) ext = 'srv1';
     else if (format === SubtitleFormat.SRV2) ext = 'srv2';
@@ -954,6 +954,7 @@ export function App() {
           case SubtitleFormat.VTT_KARAOKE: return 'VTT (Words)';
           case SubtitleFormat.TTML_KARAOKE: return 'TTML (Words)';
           case SubtitleFormat.JSON: return 'Structured JSON';
+          case SubtitleFormat.JSON3: return 'YouTube JSON3';
           case SubtitleFormat.TXT: return 'Plain Text (.txt)';
           case SubtitleFormat.SRV1: return 'YouTube SRV1';
           case SubtitleFormat.SRV2: return 'YouTube SRV2';
@@ -1383,6 +1384,13 @@ export function App() {
                         className="w-full text-left px-3 py-2 rounded-lg hover:bg-neutral-100 dark:hover:bg-neutral-800 text-sm font-medium transition flex items-center justify-between group"
                     >
                         <span className="flex items-center gap-2"><FileJson size={14} className="text-amber-500" />JSON</span>
+                        <Download size={14} className="opacity-0 group-hover:opacity-100 transition-opacity text-neutral-400" />
+                    </button>
+                    <button 
+                        onClick={() => handleExport(SubtitleFormat.JSON3)}
+                        className="w-full text-left px-3 py-2 rounded-lg hover:bg-neutral-100 dark:hover:bg-neutral-800 text-sm font-medium transition flex items-center justify-between group"
+                    >
+                        <span className="flex items-center gap-2"><FileJson size={14} className="text-amber-500" />YouTube JSON3</span>
                         <Download size={14} className="opacity-0 group-hover:opacity-100 transition-opacity text-neutral-400" />
                     </button>
                     <button 

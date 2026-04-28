@@ -177,9 +177,30 @@ export function App() {
 
   // Language Menu State
   const [isLanguageMenuOpen, setIsLanguageMenuOpen] = useState(false);
-  const [ttsLanguage, setTtsLanguage] = useState('en');
+  const [ttsLanguage, setTtsLanguage] = useState('en-US'); // Default to en-US
   const [languageSearch, setLanguageSearch] = useState('');
   const languageMenuRef = useRef<HTMLDivElement>(null);
+  const [availableVoices, setAvailableVoices] = useState<SpeechSynthesisVoice[]>([]);
+
+  useEffect(() => {
+    const loadVoices = () => {
+      const voices = window.speechSynthesis.getVoices();
+      if (voices.length > 0) {
+        setAvailableVoices(voices);
+      }
+    };
+    
+    if (window.speechSynthesis) {
+        window.speechSynthesis.onvoiceschanged = loadVoices;
+        loadVoices(); // Try immediately
+    }
+    
+    return () => {
+        if (window.speechSynthesis) {
+            window.speechSynthesis.onvoiceschanged = null;
+        }
+    };
+  }, []);
   
   // Home Page AI States
   const [homeTab, setHomeTab] = useState<'upload' | 'generate' | 'transcribe'>('upload');
@@ -1245,7 +1266,9 @@ export function App() {
                  title="TTS Language"
                >
                  <Globe size={18} />
-                 <span className="text-[10px] font-bold uppercase w-5 text-center">{ttsLanguage}</span>
+                 <span className="text-[10px] font-bold uppercase w-5 text-center">
+                    {availableVoices.find(v => v.voiceURI === ttsLanguage)?.lang.split('-')[0].substring(0, 2) || ttsLanguage.split('-')[0].substring(0, 2)}
+                 </span>
                </button>
                {isLanguageMenuOpen && (
                    <div className="absolute top-full right-0 mt-2 w-64 bg-white dark:bg-neutral-900 rounded-xl shadow-xl border border-neutral-200 dark:border-neutral-800 overflow-hidden z-50 animate-in fade-in zoom-in-95 duration-100 flex flex-col">
@@ -1255,7 +1278,7 @@ export function App() {
                                <input 
                                     autoFocus
                                     type="text" 
-                                    placeholder="Search language..."
+                                    placeholder="Search voice..."
                                     value={languageSearch}
                                     onChange={(e) => setLanguageSearch(e.target.value)}
                                     className="w-full pl-8 pr-3 py-2 bg-white dark:bg-neutral-900 border border-neutral-200 dark:border-neutral-700 rounded-lg text-sm outline-none focus:ring-2 focus:ring-primary-500 transition-all placeholder:text-neutral-400"
@@ -1263,26 +1286,53 @@ export function App() {
                            </div>
                        </div>
                        <div className="p-1 max-h-64 overflow-y-auto">
-                           <div className="px-3 py-2 text-[10px] font-bold text-neutral-400 uppercase tracking-wider">Select Language</div>
-                           {LANGUAGES.filter(l => l.name.toLowerCase().includes(languageSearch.toLowerCase()) || l.code.toLowerCase().includes(languageSearch.toLowerCase())).map((lang) => (
-                               <button
-                                  key={lang.code}
-                                  onClick={() => { setTtsLanguage(lang.code); setIsLanguageMenuOpen(false); }}
-                                  className={`w-full text-left px-3 py-2 rounded-lg text-sm transition flex items-center justify-between group
-                                    ${ttsLanguage === lang.code 
-                                        ? 'bg-primary-50 dark:bg-primary-900/20 text-primary-700 dark:text-primary-300 font-medium' 
-                                        : 'hover:bg-neutral-100 dark:hover:bg-neutral-800 text-neutral-700 dark:text-neutral-300'
-                                    }
-                                  `}
-                               >
-                                   <span className="flex items-center gap-3">
-                                       <span className="text-xl shadow-sm rounded-sm overflow-hidden">{lang.flag}</span>
-                                       <span>{lang.name}</span>
-                                   </span>
-                                   {ttsLanguage === lang.code && <Check size={16} className="text-primary-600 dark:text-primary-400" />}
-                               </button>
-                           ))}
-                           {LANGUAGES.filter(l => l.name.toLowerCase().includes(languageSearch.toLowerCase()) || l.code.toLowerCase().includes(languageSearch.toLowerCase())).length === 0 && (
+                           <div className="px-3 py-2 text-[10px] font-bold text-neutral-400 uppercase tracking-wider">Select Voice</div>
+                           {availableVoices.length > 0 ? (
+                               availableVoices.filter(v => v.name.toLowerCase().includes(languageSearch.toLowerCase()) || v.lang.toLowerCase().includes(languageSearch.toLowerCase())).map((voice) => (
+                                   <button
+                                      key={voice.voiceURI}
+                                      onClick={() => { setTtsLanguage(voice.voiceURI); setIsLanguageMenuOpen(false); }}
+                                      className={`w-full text-left px-3 py-2 rounded-lg text-sm transition flex items-center justify-between group
+                                        ${ttsLanguage === voice.voiceURI 
+                                            ? 'bg-primary-50 dark:bg-primary-900/20 text-primary-700 dark:text-primary-300 font-medium' 
+                                            : 'hover:bg-neutral-100 dark:hover:bg-neutral-800 text-neutral-700 dark:text-neutral-300'
+                                        }
+                                      `}
+                                   >
+                                       <span className="flex flex-col gap-0.5 overflow-hidden">
+                                           <span className="truncate">{voice.name}</span>
+                                           <span className="text-[10px] text-neutral-500">{voice.lang} {voice.default ? '(Default)' : ''}</span>
+                                       </span>
+                                       {ttsLanguage === voice.voiceURI && <Check size={16} className="text-primary-600 dark:text-primary-400 shrink-0 ml-2" />}
+                                   </button>
+                               ))
+                           ) : (
+                               LANGUAGES.filter(l => l.name.toLowerCase().includes(languageSearch.toLowerCase()) || l.code.toLowerCase().includes(languageSearch.toLowerCase())).map((lang) => (
+                                   <button
+                                      key={lang.code}
+                                      onClick={() => { setTtsLanguage(lang.code); setIsLanguageMenuOpen(false); }}
+                                      className={`w-full text-left px-3 py-2 rounded-lg text-sm transition flex items-center justify-between group
+                                        ${ttsLanguage === lang.code 
+                                            ? 'bg-primary-50 dark:bg-primary-900/20 text-primary-700 dark:text-primary-300 font-medium' 
+                                            : 'hover:bg-neutral-100 dark:hover:bg-neutral-800 text-neutral-700 dark:text-neutral-300'
+                                        }
+                                      `}
+                                   >
+                                       <span className="flex items-center gap-3">
+                                           <span className="text-xl shadow-sm rounded-sm overflow-hidden">{lang.flag}</span>
+                                           <span>{lang.name}</span>
+                                       </span>
+                                       {ttsLanguage === lang.code && <Check size={16} className="text-primary-600 dark:text-primary-400" />}
+                                   </button>
+                               ))
+                           )}
+                           
+                           {availableVoices.length > 0 && availableVoices.filter(v => v.name.toLowerCase().includes(languageSearch.toLowerCase()) || v.lang.toLowerCase().includes(languageSearch.toLowerCase())).length === 0 && (
+                                <div className="p-4 text-center text-neutral-400 text-sm">
+                                    No voices found
+                                </div>
+                           )}
+                           {availableVoices.length === 0 && LANGUAGES.filter(l => l.name.toLowerCase().includes(languageSearch.toLowerCase()) || l.code.toLowerCase().includes(languageSearch.toLowerCase())).length === 0 && (
                                 <div className="p-4 text-center text-neutral-400 text-sm">
                                     No languages found
                                 </div>

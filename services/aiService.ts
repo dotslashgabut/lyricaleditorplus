@@ -333,20 +333,16 @@ export const refineLyrics = async (
   }
 };
 
-// --- TTS Features (Google Translate Source) ---
+// --- TTS Features (Web Speech API) ---
 
-let currentAudio: HTMLAudioElement | null = null;
+// Keep a global reference to the Utterance to prevent Garbage Collection bugs in Chromium browsers
+let currentUtterance: SpeechSynthesisUtterance | null = null;
 
 export const stopTTS = () => {
-    if (currentAudio) {
-        try {
-            currentAudio.pause();
-            currentAudio.currentTime = 0;
-        } catch (e) {
-            // ignore if already stopped or error
-        }
-        currentAudio = null;
+    if (window.speechSynthesis) {
+        window.speechSynthesis.cancel();
     }
+    currentUtterance = null;
 };
 
 export const playTTS = async (text: string, lang: string = 'en') => {
@@ -355,31 +351,61 @@ export const playTTS = async (text: string, lang: string = 'en') => {
     const textToSpeak = text.trim();
     if (!textToSpeak) return;
 
-    // Use Google Translate's unofficial TTS API
-    // client=tw-ob is key to access it freely
-    const encodedText = encodeURIComponent(textToSpeak);
-    const url = `https://translate.google.com/translate_tts?ie=UTF-8&q=${encodedText}&tl=${lang}&client=tw-ob`;
-
     return new Promise<void>((resolve, reject) => {
-        const audio = new Audio(url);
-        currentAudio = audio;
+        if (!window.speechSynthesis) {
+            reject(new Error("Web Speech API is not supported in this browser."));
+            return;
+        }
 
-        audio.onended = () => {
-            if (currentAudio === audio) {
-                currentAudio = null;
+        const utterance = new SpeechSynthesisUtterance(textToSpeak);
+        currentUtterance = utterance; // Pin memory reference
+        
+        // Ensure voices are loaded (sometimes synchronous, sometimes asynchronous)
+        const loadVoiceAndSpeak = () => {
+            const voices = window.speechSynthesis.getVoices();
+            if (voices.length > 0) {
+                // Try finding an exact voiceURI match, then locale match, then base language match
+                const matchedVoice = voices.find(v => v.voiceURI === lang) || 
+                                     voices.find(v => v.lang.startsWith(lang)) || 
+                                     voices.find(v => v.lang.startsWith(lang.split('-')[0]));
+                                     
+                if (matchedVoice) {
+                    utterance.voice = matchedVoice;
+                    utterance.lang = matchedVoice.lang;
+                } else {
+                    utterance.lang = lang;
+                }
+            } else {
+                utterance.lang = lang;
             }
-            resolve();
+
+            utterance.onend = () => {
+                if (currentUtterance === utterance) currentUtterance = null;
+                resolve();
+            };
+
+            utterance.onerror = (e) => {
+                console.error("TTS Playback Error", e);
+                if (currentUtterance === utterance) currentUtterance = null;
+                // Don't reject on 'canceled' (when we manually stop it)
+                if (e.error !== 'canceled') {
+                    reject(new Error(`Failed to play TTS: ${e.error}`));
+                } else {
+                    resolve();
+                }
+            };
+
+            window.speechSynthesis.speak(utterance);
         };
 
-        audio.onerror = (e) => {
-            console.error("TTS Playback Error", e);
-            reject(new Error("Failed to play audio from Google Translate."));
-        };
-
-        // Attempt to play
-        audio.play().catch(e => {
-            // User interaction policy might block auto-play if not triggered by click
-            reject(e);
-        });
+        // If voices aren't populated yet, wait for them
+        if (window.speechSynthesis.getVoices().length === 0) {
+            window.speechSynthesis.onvoiceschanged = () => {
+                loadVoiceAndSpeak();
+                window.speechSynthesis.onvoiceschanged = null; // Clean up listener
+            };
+        } else {
+            loadVoiceAndSpeak();
+        }
     });
 };

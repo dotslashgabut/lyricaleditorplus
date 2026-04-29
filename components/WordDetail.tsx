@@ -202,4 +202,4 @@ const WordDetail: React.FC<WordDetailProps> = ({ cue, onSave, onClose }) => {
   );
 };
 
-export default WordDetail;
+export default React.memo(WordDetail);

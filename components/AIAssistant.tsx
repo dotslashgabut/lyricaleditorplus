@@ -134,4 +134,4 @@ const AIAssistant: React.FC<AIAssistantProps> = ({ cues, onApply, onClose }) => 
   );
 };
 
-export default AIAssistant;
+export default React.memo(AIAssistant);

@@ -2,7 +2,7 @@
 
 
 
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect, useRef, useMemo } from 'react';
 import { FileData, SubtitleFormat, Cue, Word, Metadata } from './types';
 import { detectFormat, parseContent, stringifyContent } from './services/subtitleParser';
 import { msToLrc } from './utils/timeUtils';
@@ -113,7 +113,7 @@ export function App() {
   const [fileData, setFileData] = useState<FileData | null>(null);
   const [lastActiveFileData, setLastActiveFileData] = useState<FileData | null>(null);
   const [cues, setCues] = useState<Cue[]>([]);
-  const [viewMode, setViewMode] = useState<'line' | 'word'>('line');
+  const [viewMode, setViewMode] = useState<'line' | 'word' | 'timeline'>('line');
   const [metadata, setMetadata] = useState<Metadata>({ title: '', artist: '', album: '', by: '' });
   const [selectedCueIds, setSelectedCueIds] = useState<Set<string>>(new Set());
   const [lastSelectedIndex, setLastSelectedIndex] = useState<number | null>(null);
@@ -965,9 +965,11 @@ export function App() {
     setIsFindReplaceOpen(false);
   };
 
-  const filteredCues = cues.filter(c => 
-    c.text.toLowerCase().includes(searchQuery.toLowerCase())
-  );
+  const filteredCues = useMemo(() => {
+    const q = searchQuery.toLowerCase();
+    if (!q) return cues;
+    return cues.filter(c => c.text.toLowerCase().includes(q));
+  }, [cues, searchQuery]);
 
   const getFormatDisplayName = (fmt: SubtitleFormat) => {
       switch(fmt) {
@@ -1733,6 +1735,7 @@ export function App() {
                           <div className="flex items-center bg-neutral-100 dark:bg-neutral-900 p-1 rounded-lg">
                               <button onClick={() => setViewMode('line')} className={`px-2 py-1.5 rounded-md text-[10px] uppercase font-bold transition ${viewMode === 'line' ? 'bg-white dark:bg-neutral-800 shadow-sm text-neutral-900 dark:text-white' : 'text-neutral-500'}`}>Lines</button>
                               <button onClick={() => setViewMode('word')} className={`px-2 py-1.5 rounded-md text-[10px] uppercase font-bold transition ${viewMode === 'word' ? 'bg-white dark:bg-neutral-800 shadow-sm text-neutral-900 dark:text-white' : 'text-neutral-500'}`}>Words</button>
+                              <button onClick={() => setViewMode('timeline')} className={`px-2 py-1.5 rounded-md text-[10px] uppercase font-bold transition ${viewMode === 'timeline' ? 'bg-white dark:bg-neutral-800 shadow-sm text-neutral-900 dark:text-white' : 'text-neutral-500'}`}>Timeline</button>
                           </div>
                           <button onClick={() => setIsAIAssistantOpen(true)} className="flex items-center gap-2 px-3 py-1.5 bg-gradient-to-r from-orange-500 to-red-600 text-white rounded-lg text-xs font-bold shadow-lg shadow-orange-500/20 hover:shadow-orange-500/40 transition active:scale-95">
                               <Sparkles size={14} /> AI

@@ -301,7 +301,7 @@ const MemoCueRow = React.memo(({
                 onDragOver={(e) => handleDragOver(e, index)}
                 onDrop={(e) => handleDrop(e, index)}
                 className={`
-                  group relative rounded-2xl transition-all duration-300 flex flex-col md:flex-row ${viewMode === 'timeline' ? 'p-3 md:p-4 gap-3 md:gap-4' : 'p-5 md:p-6 gap-6 md:gap-10'} items-start border
+                  group relative rounded-2xl transition-all duration-300 flex flex-col md:flex-row ${viewMode === 'timeline' ? 'p-3 md:p-4 gap-2 md:gap-2' : 'p-5 md:p-6 gap-6 md:gap-10'} items-start border
                   ${isActive 
                     ? 'bg-primary-50 dark:bg-primary-900/20 border-primary-400 dark:border-primary-600 shadow-xl shadow-primary-500/10 scale-[1.01] z-10' 
                     : isSelected
@@ -498,9 +498,9 @@ const MemoCueRow = React.memo(({
                         </div>
                      </div>
                   ) : viewMode === 'timeline' ? (
-                     <div className="pl-12 w-full py-2 flex items-center gap-2">
+                     <div className="pl-10 w-full py-2 flex items-center gap-2">
                          <div className="flex-1 flex flex-col">
-                            <div className="relative h-12 bg-neutral-100 dark:bg-neutral-800 rounded-lg border border-neutral-200 dark:border-neutral-700 flex select-none overflow-hidden">
+                            <div className="relative h-12 bg-neutral-100 dark:bg-neutral-800 rounded-lg border border-neutral-200 dark:border-neutral-700 flex select-none">
                                {(() => {
                                    let renderCue = { ...cue };
                                    let renderWords = getDisplayWords(cue, index).map((w: any) => ({ ...w }));
@@ -524,6 +524,10 @@ const MemoCueRow = React.memo(({
                                                renderWords[wIdx].end = currentMs;
                                                renderWords[wIdx + 1].start = currentMs;
                                            }
+                                       } else if (timelineDragInfo.type === 'word-move' && timelineDragInfo.wordIdx !== undefined && timelineDragInfo.duration !== undefined) {
+                                           const wIdx = timelineDragInfo.wordIdx;
+                                           renderWords[wIdx].start = currentMs;
+                                           renderWords[wIdx].end = currentMs + timelineDragInfo.duration;
                                        }
                                    }
 
@@ -572,23 +576,54 @@ const MemoCueRow = React.memo(({
                                                return (
                                                    <div 
                                                       key={`tw-${index}-${wIdx}`}
-                                                      className={`absolute h-full flex flex-col justify-center items-center border-r border-neutral-300 dark:border-neutral-600 overflow-hidden box-border cursor-pointer ${isWordActive ? 'bg-primary-100 dark:bg-primary-900/60' : 'bg-white dark:bg-neutral-800'}`}
+                                                      className={`absolute h-full flex flex-col justify-center items-center border-r border-neutral-300 dark:border-neutral-600 box-border cursor-pointer transition-shadow group/word ${isWordActive ? 'bg-primary-100 dark:bg-primary-900/60' : 'bg-white dark:bg-neutral-800'} ${timelineDragInfo?.type === 'word-move' && timelineDragInfo.wordIdx === wIdx ? 'ring-2 ring-primary-500 z-40 shadow-lg' : 'hover:bg-neutral-50 dark:hover:bg-neutral-700'}`}
                                                       style={{
                                                           left: `${leftPxPercent}%`,
                                                           width: `${widthPercent}%`
                                                       }}
-                                                      onClick={() => onSeek && onSeek(wordStart, true, wordEnd)}
+                                                      onMouseDown={(e) => {
+                                                          if (e.button !== 0) return;
+                                                          e.preventDefault();
+                                                          e.stopPropagation();
+                                                          
+                                                          const parentEl = e.currentTarget.parentElement;
+                                                          if (!parentEl) return;
+                                                          const pixelsPerMs = parentEl.offsetWidth / cueDuration;
+                                                          
+                                                          const words = getDisplayWords(cue, index);
+                                                          const wordStart = word.start || renderCue.start;
+                                                          const wordEnd = word.end || (wordStart + 300);
+                                                          const minLimit = wIdx === 0 ? renderCue.start : (words[wIdx-1].end || renderCue.start);
+                                                          const maxLimit = wIdx === words.length - 1 ? renderCue.end : (words[wIdx+1].start || renderCue.end);
+                                                          const duration = wordEnd - wordStart;
+
+                                                          setTimelineDragInfo({
+                                                              type: 'word-move',
+                                                              cueIndex: index,
+                                                              wordIdx: wIdx,
+                                                              startX: e.clientX,
+                                                              initialBoundaryMs: wordStart,
+                                                              currentBoundaryMs: wordStart,
+                                                              minMs: minLimit,
+                                                              maxMs: maxLimit - duration,
+                                                              pixelsPerMs,
+                                                              duration
+                                                          });
+                                                      }}
+                                                      onClick={() => onSeek && onSeek(word.start || renderCue.start, true, word.end || (word.start || renderCue.start) + 300)}
                                                    >
-                                                       <div className="px-1 text-xs font-semibold whitespace-nowrap overflow-hidden text-ellipsis text-neutral-800 dark:text-neutral-200 pointer-events-none">
+                                                       <div className="px-1 w-full text-xs font-semibold whitespace-nowrap overflow-hidden text-ellipsis text-center text-neutral-800 dark:text-neutral-200 pointer-events-none">
                                                           {word.text}
                                                        </div>
-                                                       <div className="px-1 text-[9px] text-neutral-400 pointer-events-none">
-                                                          {((wordEnd - wordStart) / 1000).toFixed(2)}s
+                                                       <div className="flex items-center gap-1.5 px-1 w-full text-[8px] text-neutral-400 pointer-events-none justify-center">
+                                                          <span className="opacity-0 group-hover/word:opacity-100 transition-opacity">{msToMmSsMmm(wordStart).split(':').slice(1).join(':')}</span>
+                                                          <span className="text-neutral-500 font-bold">{((wordEnd - wordStart) / 1000).toFixed(2)}s</span>
+                                                          <span className="opacity-0 group-hover/word:opacity-100 transition-opacity">{msToMmSsMmm(wordEnd).split(':').slice(1).join(':')}</span>
                                                        </div>
                                                        
                                                        {wIdx + 1 < allWords.length && (
                                                            <div 
-                                                              className="absolute -right-1.5 top-0 bottom-0 w-3 cursor-ew-resize hover:bg-primary-500/50 z-20 tooltip"
+                                                              className="absolute -right-2 top-0 bottom-0 w-4 cursor-ew-resize hover:bg-primary-500/50 z-50 flex items-center justify-center group/handle"
                                                               title="Drag to adjust boundary"
                                                               onMouseDown={(e) => {
                                                                   e.preventDefault();
@@ -611,7 +646,9 @@ const MemoCueRow = React.memo(({
                                                                       pixelsPerMs
                                                                   });
                                                               }}
-                                                           />
+                                                           >
+                                                               <div className="w-1 h-4 bg-neutral-300 dark:bg-neutral-600 rounded-full group-hover/handle:bg-primary-500 transition-colors" />
+                                                           </div>
                                                        )}
                                                    </div>
                                                );
@@ -680,7 +717,7 @@ const MemoCueRow = React.memo(({
                             </div>
                             <div className="flex items-center justify-between text-[10px] text-neutral-400 mt-1 uppercase font-semibold">
                                 <span>{msToMmSsMmm(timelineDragInfo?.cueIndex === index && timelineDragInfo.type === 'cue-start' ? timelineDragInfo.currentBoundaryMs : cue.start)}</span>
-                                <span>Timeline View (Drag boundaries to adjust)</span>
+                                <span>Timeline View (Drag words or boundaries to adjust)</span>
                                 <span>{msToMmSsMmm(timelineDragInfo?.cueIndex === index && timelineDragInfo.type === 'cue-end' ? timelineDragInfo.currentBoundaryMs : cue.end)}</span>
                             </div>
                          </div>
@@ -764,7 +801,7 @@ const CueList: React.FC<CueListProps> = ({ cues, onChange, onEditWords, currentM
 
   // Timeline dragging state
   const [timelineDragInfo, setTimelineDragInfo] = useState<{
-    type: 'word' | 'cue-start' | 'cue-end';
+    type: 'word' | 'cue-start' | 'cue-end' | 'word-move';
     cueIndex: number;
     wordIdx?: number;
     startX: number;
@@ -773,6 +810,7 @@ const CueList: React.FC<CueListProps> = ({ cues, onChange, onEditWords, currentM
     minMs: number;
     maxMs: number;
     pixelsPerMs: number;
+    duration?: number;
   } | null>(null);
 
   useEffect(() => {
@@ -794,7 +832,7 @@ const CueList: React.FC<CueListProps> = ({ cues, onChange, onEditWords, currentM
         setTimelineDragInfo(prev => {
             if (!prev) return null;
             
-            const { type, cueIndex, wordIdx, currentBoundaryMs, initialBoundaryMs } = prev;
+            const { type, cueIndex, wordIdx, currentBoundaryMs, initialBoundaryMs, duration } = prev;
             
             if (currentBoundaryMs !== initialBoundaryMs) {
                 const newCues = [...cues];
@@ -804,6 +842,9 @@ const CueList: React.FC<CueListProps> = ({ cues, onChange, onEditWords, currentM
                 if (type === 'word' && wordIdx !== undefined) {
                     words[wordIdx].end = currentBoundaryMs;
                     words[wordIdx + 1].start = currentBoundaryMs;
+                } else if (type === 'word-move' && wordIdx !== undefined && duration !== undefined) {
+                    words[wordIdx].start = currentBoundaryMs;
+                    words[wordIdx].end = currentBoundaryMs + duration;
                 } else if (type === 'cue-start') {
                     cue.start = currentBoundaryMs;
                     if (words[0]?.start !== undefined) {
@@ -842,13 +883,16 @@ const CueList: React.FC<CueListProps> = ({ cues, onChange, onEditWords, currentM
   useEffect(() => {
     if (activeIndex !== -1 && itemRefs.current[activeIndex]) {
       if (draggedIndex === null) {
-          itemRefs.current[activeIndex]?.scrollIntoView({
-            behavior: 'smooth',
-            block: 'center'
-          });
+          const scrollTimer = setTimeout(() => {
+              itemRefs.current[activeIndex]?.scrollIntoView({
+                behavior: 'smooth',
+                block: 'center'
+              });
+          }, 50);
+          return () => clearTimeout(scrollTimer);
       }
     }
-  }, [activeIndex, draggedIndex]);
+  }, [activeIndex, draggedIndex, viewMode]);
 
   const updateCue = (index: number, field: keyof Cue, value: string | number) => {
     const newCues = [...cues];
